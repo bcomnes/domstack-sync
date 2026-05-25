@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Scroll fixture</title>
+  <style>
+    body {
+      min-height: 3200px;
+      margin: 0;
+    }
+
+    .spacer {
+      height: 1200px;
+    }
+
+    .pane {
+      width: 260px;
+      height: 120px;
+      overflow: auto;
+      border: 1px solid #999;
+      margin: 20px;
+    }
+
+    .pane__content {
+      height: 900px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Scroll fixture</h1>
+  <div id="source-pane" class="pane"><div class="pane__content">Source pane</div></div>
+  <div id="target-pane" class="pane"><div class="pane__content">Target pane</div></div>
+  <div class="spacer"></div>
+</body>
+</html>

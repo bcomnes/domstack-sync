@@ -1,0 +1,23 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": false,
+    "declaration": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": false,
+    "noEmit": false,
+    "outDir": "./dist"
+  },
+  "exclude": [
+    "**/*.js",
+    "**/*.test.ts",
+    "node_modules",
+    "coverage",
+    ".github",
+    ".legacy",
+    "browser-tests",
+    "lib/client",
+    "lib/ui/app",
+    "dist"
+  ]
+}

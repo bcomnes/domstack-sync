@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Forms fixture</title>
+</head>
+<body>
+  <h1>Forms fixture</h1>
+  <form id="sync-form" action="/submitted.html" method="get">
+    <input id="text-input" name="text" value="initial">
+    <textarea id="text-area" name="area">initial area</textarea>
+    <label><input id="checkbox-input" type="checkbox" name="enabled" value="yes"> Enabled</label>
+    <label><input id="radio-one" type="radio" name="choice" value="one"> One</label>
+    <label><input id="radio-two" type="radio" name="choice" value="two"> Two</label>
+    <select id="select-input" name="select">
+      <option value="one">One</option>
+      <option value="two">Two</option>
+    </select>
+    <button id="reset-button" type="reset">Reset</button>
+    <button id="submit-button" type="submit">Submit</button>
+  </form>
+</body>
+</html>
