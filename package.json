@@ -1,0 +1,83 @@
+{
+  "name": "@domstack/sync",
+  "description": "A modern, minimal live-reload dev server",
+  "version": "0.0.0",
+  "author": "Bret Comnes <bcomnes@gmail.com> (https://bret.io)",
+  "bugs": {
+    "url": "https://github.com/bcomnes/static-server/issues"
+  },
+  "license": "MIT",
+  "type": "module",
+  "main": "index.js",
+  "module": "index.js",
+  "types": "index.d.ts",
+  "bin": {
+    "domstack-sync": "./lib/cli.js",
+    "dss": "./lib/cli.js"
+  },
+  "engines": {
+    "node": ">=20",
+    "npm": ">=10"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bcomnes/static-server.git"
+  },
+  "homepage": "https://github.com/bcomnes/static-server",
+  "keywords": [
+    "live-reload",
+    "dev-server",
+    "domstack-sync",
+    "browser-sync"
+  ],
+  "dependencies": {
+    "@fastify/cors": "^10.0.0",
+    "@fastify/middie": "^9.3.2",
+    "@fastify/static": "^8.0.0",
+    "argsclopts": "^1.0.5",
+    "chokidar": "^4.0.0",
+    "fastify": "^5.0.0",
+    "picomatch": "^4.0.0",
+    "pino": "^9.0.0",
+    "pino-pretty": "^13.0.0",
+    "ws": "^8.0.0"
+  },
+  "devDependencies": {
+    "@fastify/type-provider-json-schema-to-ts": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "@types/picomatch": "^3.0.0",
+    "@types/ws": "^8.0.0",
+    "@voxpelli/tsconfig": "^16.1.0",
+    "esbuild": "^0.25.0",
+    "htm": "^3.0.0",
+    "json-schema-to-ts": "^3.1.1",
+    "neostandard": "^0.13.0",
+    "npm-run-all2": "^9.0.0",
+    "preact": "^10.0.0",
+    "releasearoni": "^0.2.0",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "prepublishOnly": "npm run build && git push --follow-tags && releasearoni -y",
+    "postpublish": "npm run clean",
+    "test": "run-s test:*",
+    "test:lint": "eslint .",
+    "test:tsc": "tsc",
+    "test:node-test": "node --experimental-test-coverage --test-reporter=spec --test-reporter=lcov --test-reporter-destination=stdout --test-reporter-destination=lcov.info --test-timeout=10000 --test",
+    "version": "releasearoni version",
+    "build": "npm run clean && run-p build:*",
+    "build:client": "esbuild lib/client/index.ts --bundle --platform=browser --target=es2020 --format=iife --global-name=BrowserSyncClient --minify --outfile=lib/client/dist/browser-sync-client.js",
+    "build:ui-js": "esbuild lib/ui/app/index.ts --bundle --platform=browser --target=es2020 --format=iife --minify --outfile=lib/ui/public/app.js",
+    "build:ui-css": "esbuild lib/ui/app/styles/index.css --bundle --minify --outfile=lib/ui/public/app.css",
+    "build:declaration": "tsc -p declaration.tsconfig.json",
+    "clean": "run-p clean:*",
+    "clean:declarations-top": "rm -rf $(find . -maxdepth 1 -type f -name '*.d.ts*')",
+    "clean:js-top": "rm -rf $(find . -maxdepth 1 -type f -name '*.js' ! -name '*.config.js')",
+    "clean:declarations-lib": "rm -rf $(find lib -type f -name '*.d.ts*' ! -name '*-types.d.ts')",
+    "clean:js-lib": "rm -rf $(find lib -type f -name '*.js' ! -path 'lib/client/dist/*' ! -path 'lib/ui/public/*')"
+  },
+  "funding": {
+    "type": "individual",
+    "url": "https://github.com/sponsors/bcomnes"
+  }
+}

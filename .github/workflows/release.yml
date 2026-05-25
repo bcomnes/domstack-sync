@@ -1,0 +1,38 @@
+name: npm bump
+
+on:
+  workflow_dispatch:
+    inputs:
+      newversion:
+        description: 'npm version {major,minor,patch}'
+        required: true
+
+env:
+  FORCE_COLOR: 1
+
+concurrency:
+  group: npm-bump
+  cancel-in-progress: true
+
+jobs:
+  version_and_release:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Use Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version-file: package.json
+        registry-url: 'https://registry.npmjs.org'
+    - run: npm i
+    - run: npm test
+    - name: npm version && npm publish
+      uses: bcomnes/npm-bump@v3
+      with:
+        git_email: bcomnes@gmail.com
+        git_username: ${{ github.actor }}
+        newversion: ${{ github.event.inputs.newversion }}
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        npm_token: ${{ secrets.NPM_TOKEN }}
