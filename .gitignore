@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+lcov.info
+*.log
+.DS_Store
+legacy/
+lib/client/dist/
+lib/ui/public/app.js
+lib/ui/public/app.css
