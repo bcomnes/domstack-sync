@@ -48,6 +48,7 @@
   },
   "devDependencies": {
     "@fastify/type-provider-json-schema-to-ts": "^5.0.0",
+    "@playwright/test": "^1.60.0",
     "@types/node": "^22.0.0",
     "@types/picomatch": "^3.0.0",
     "@types/ws": "^8.0.0",
@@ -66,6 +67,7 @@
     "test:lint": "eslint .",
     "test:tsc": "tsc",
     "test:node-test": "node --experimental-test-coverage --test-reporter=spec --test-reporter=lcov --test-reporter-destination=stdout --test-reporter-destination=lcov.info --test-timeout=10000 --test",
+    "test:playwright": "npm run build && playwright test --timeout=10000",
     "version": "releasearoni version",
     "build": "npm run clean && run-p build:*",
     "build:client": "esbuild lib/client/index.ts --bundle --platform=browser --target=es2020 --format=iife --global-name=BrowserSyncClient --minify --outfile=lib/client/dist/browser-sync-client.js",

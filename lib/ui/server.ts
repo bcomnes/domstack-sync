@@ -542,6 +542,8 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
         client.terminate()
       }
       await new Promise<void>((resolve, reject) => wss.close(err => err ? reject(err) : resolve()))
+      fastify.server.closeIdleConnections?.()
+      fastify.server.closeAllConnections?.()
       await fastify.close()
     },
   }

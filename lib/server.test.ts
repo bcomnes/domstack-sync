@@ -809,7 +809,7 @@ test('createServer: plugin server middleware preserves registration order', { ti
     'plugin:name': 'middleware-first',
     plugin () {},
     hooks: {
-      'server:middleware': () => (req, _res, next) => {
+      'server:middleware': (): PluginMiddleware => (req, _res, next) => {
         if (req.url === '/middleware-order') order.push('first')
         next()
       },
@@ -819,7 +819,7 @@ test('createServer: plugin server middleware preserves registration order', { ti
     'plugin:name': 'middleware-second',
     plugin () {},
     hooks: {
-      'server:middleware': () => (req, res, next) => {
+      'server:middleware': (): PluginMiddleware => (req, res, next) => {
         if ((req.url ?? '').startsWith('/middleware-order')) {
           order.push('second')
           res.setHeader('content-type', 'text/plain; charset=utf-8')

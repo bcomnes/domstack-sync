@@ -160,7 +160,7 @@ document.addEventListener('scroll', (e) => {
   if (!msg) return
   lastScrollSentAt = now
   send(msg)
-}, { passive: true })
+}, { passive: true, capture: true })
 
 // Ghost mode — click sync (skip label clicks that will also fire on the associated input)
 document.addEventListener('click', (e) => {

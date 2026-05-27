@@ -139,6 +139,11 @@ export class BsSockets extends EventEmitter {
   }
 
   close (): Promise<void> {
+    for (const client of this.wss.clients) {
+      client.terminate()
+    }
+    this.clientMap.clear()
+
     return new Promise((resolve, reject) => {
       this.wss.close((err) => {
         if (err) reject(err)

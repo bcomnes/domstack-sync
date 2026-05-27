@@ -21,14 +21,14 @@ When completing work, update both the checkbox and the "Progress notes" for the 
 |---|---|---|---|
 | UI connection stability | `[x]` | Codex | UI WebSocket replays late state, reconnects with backoff, exposes connection status, closes clients cleanly, and has non-browser client tests. |
 | Runtime options handshake | `[x]` | Codex | Server sends runtime options on browser connect, accepts live UI option patches, broadcasts browser option snapshots, and has non-browser UI/server coverage. |
-| Scroll sync loop prevention | `[~]` | Codex | Legacy `scroll` and `scroll:element` payloads, element scroll, mapping, proportional scroll, suppression, and throttling are implemented. Browser-level loop tests remain. |
-| Click, form, and navigation sync | `[~]` | Codex | Legacy ghost event names and payloads are implemented for click, forms, and navigation. Browser behavior tests remain. |
+| Scroll sync loop prevention | `[x]` | Codex | Legacy `scroll` and `scroll:element` payloads, element scroll, mapping, proportional scroll, suppression, throttling, and Chromium browser loop tests are implemented. |
+| Click, form, and navigation sync | `[x]` | Codex | Legacy ghost event names and payloads are implemented for click, forms, and navigation, with Chromium browser behavior coverage. |
 | File watcher buffering and reload decisions | `[x]` | Codex | Watcher emits buffered batches with timestamps, legacy default `watchEvents`, whole-batch classification, reload throttling, and object watcher entries. |
 | Reload and stream API semantics | `[x]` | Codex | Watcher, reload(files), stream, modern HTTP reload, and legacy HTTP protocol reload share reload-vs-inject decisions where file args are supplied. |
-| CSS and asset injection parity | `[~]` | Codex | Legacy `injectFileTypes`, `tagNames`, generic file reload messages, imported CSS, and image/style asset refresh are implemented; browser smoke tests remain. |
-| UI built-in feature parity | `[x]` | Codex | Default shipped UI pages were audited against legacy plugin pages and are functional; browser rendering parity tests remain tracked in Section 10. |
+| CSS and asset injection parity | `[x]` | Codex | Legacy `injectFileTypes`, `tagNames`, generic file reload messages, imported CSS, and image/style asset refresh are implemented and covered by Chromium browser tests. |
+| UI built-in feature parity | `[x]` | Codex | Default shipped UI pages were audited against legacy plugin pages, are functional, and have Chromium rendering/action coverage. |
 | Plugin system parity | `[x]` | Codex | Modern plugin manager supports configured plugins, lifecycle, active state, legacy hooks, client events, UI metadata/pages, UI events, option mutation, package resolution, and middleware/file helpers via `@fastify/middie`. |
-| Parity test coverage | `[~]` | Codex | Added socket runtime/path/event tests, reload decision tests, watcher buffered-batch/throttle tests, UI action tests, plugin-system parity tests, and server smoke tests. Browser rendering/client behavior parity tests remain. |
+| Parity test coverage | `[x]` | Codex | Added Node parity coverage plus Chromium Playwright coverage for asset injection, cross-window sync, UI pages/actions, remote debug DOM injection, plugins, and network throttle. |
 | Fastify route typing and hypermedia UI migration | `[x]` | Codex | Production Fastify routes now use JSON Schema/type-provider coverage; the UI shell/pages moved to `@fastify/view` + Handlebars + HTMX 4 beta from npm; Preact/HTM were removed. |
 
 ## 1. UI Connection Stability
@@ -73,7 +73,7 @@ Goal: remote scrolls should not bounce back and forth between connected browsers
 - `[x]` Suppress outgoing scroll events briefly after applying an incoming scroll.
 - `[x]` Avoid emitting when the incoming scroll position is already effectively current.
 - `[x]` Add optional outgoing scroll throttling using `scrollThrottle` or `requestAnimationFrame`.
-- `[ ]` Add tests proving browser A scrolls browser B once and B does not echo the event back to A.
+- `[x]` Add tests proving browser A scrolls browser B once and B does not echo the event back to A.
 - `[x]` Replace the simplified scroll payload with the legacy payload shape: `position`, `tagName`, `index`, and `mappingIndex`.
 - `[x]` Port element scroll support from the legacy client, including captured document scroll events and non-document scroll targets.
 - `[x]` Port `scrollElements` and `scrollElementMapping` behavior.
@@ -84,6 +84,7 @@ Progress notes:
 - 2026-05-26: Incoming scroll messages now set a short suppression window before applying `scrollTo`, and outgoing scroll events honor `scrollThrottle`.
 - 2026-05-26: Scroll messages now use the legacy payload shape and support document scroll, element scroll by tag/index, `scrollElementMapping`, `scrollElements`, and proportional application.
 - 2026-05-26: Document scroll uses the legacy `scroll` event name and element scroll uses the legacy `scroll:element` event name.
+- 2026-05-26: Added Chromium Playwright coverage proving document scroll mirrors once without a remote echo and mapped element scroll targets are applied in a real browser.
 
 ## 4. Click, Form, and Navigation Sync
 
@@ -161,7 +162,7 @@ Goal: CSS and static asset live injection should cover the important legacy case
 - `[x]` Refresh matching inline style image URLs, including `backgroundImage`, `borderImage`, `webkitBorderImage`, and `MozBorderImage`.
 - `[x]` Preserve legacy best-match path behavior for stylesheet and asset matching.
 - `[x]` Fall back to full reload when no matching injectable asset is found.
-- `[ ]` Add browser tests for direct CSS, imported CSS, and image reload behavior.
+- `[x]` Add browser tests for direct CSS, imported CSS, and image reload behavior.
 - `[x]` Add tests proving mixed injectable batches like `["styles.css", "logo.png"]` inject instead of full reloading.
 - `[x]` Add tests proving batches with any non-injectable extension still full reload.
 
@@ -169,7 +170,8 @@ Progress notes:
 
 - 2026-05-26: Server now sends CSS reload only for all-CSS batches. Client falls back to full reload when CSS injection is disabled or no matching stylesheet link is found.
 - 2026-05-26: Updated parity target to follow legacy `injectFileTypes`, `tagNames`, imported stylesheet reloads, image reloads, inline style URL refreshes, and legacy path matching semantics.
-- 2026-05-26: Implemented generic `file-reload` messages, `injectFileTypes` classification, `tagNames`, imported stylesheet rewrites, image cache-busting, inline style URL cache-busting, and best-match path matching. Browser automation smoke testing is still outstanding and is intentionally deferred by the current request.
+- 2026-05-26: Implemented generic `file-reload` messages, `injectFileTypes` classification, `tagNames`, imported stylesheet rewrites, image cache-busting, inline style URL cache-busting, and best-match path matching.
+- 2026-05-26: Added Chromium Playwright coverage for direct stylesheet reloads via public API and HTTP route, imported stylesheet refreshes, `<img src>` cache-busting, inline style image URL cache-busting, and notify overlay rendering.
 
 ## 8. UI Built-In Feature Parity
 
@@ -241,6 +243,8 @@ Progress notes:
 
 Goal: lock down the recovered behavior with tests before broad refactors continue.
 
+Browser test direction: standardize new browser-level coverage on Playwright. Use the existing legacy Playwright examples as the first reference, and port applicable legacy Protractor/Selenium and Karma browser-client tests to Playwright rather than carrying forward Selenium, Protractor, Karma, or Cypress. Keep the product decisions from this plan intact: proxy mode and HTTPS-specific behavior remain intentionally omitted unless that scope is reopened later.
+
 - `[x]` Add watcher tests for buffered debounce and mixed file batches.
 - `[x]` Add tests for `reloadThrottle`.
 - `[x]` Add tests for object watcher `match`, per-watch `options`, `fn`, and configured `watchEvents`.
@@ -249,25 +253,32 @@ Goal: lock down the recovered behavior with tests before broad refactors continu
 - `[x]` Add unit tests for mixed injectable batches and non-injectable fallback.
 - `[x]` Add stream tests for `match`, `once`, and batch classification.
 - `[x]` Add socket tests for pathname sync and options updates.
-- `[ ]` Add client or browser tests for scroll loop suppression.
-- `[ ]` Add client or browser tests for element scroll sync and `scrollElementMapping`.
+- `[x]` Add client or browser tests for scroll loop suppression.
+- `[x]` Add client or browser tests for element scroll sync and `scrollElementMapping`.
 - `[x]` Add socket tests for `scroll:element` relay behavior.
-- `[ ]` Add client or browser tests for incoming click handling.
-- `[~]` Add client or browser tests proving click sync uses legacy `tagName` plus `index` targeting.
+- `[x]` Add client or browser tests for incoming click handling.
+- `[x]` Add client or browser tests proving click sync uses legacy `tagName` plus `index` targeting.
 - `[x]` Add socket tests for `browser:location` relay behavior.
 - `[x]` Add socket tests for `form:submit` and `form:reset` relay behavior.
-- `[ ]` Add client or browser tests for image and inline style URL injection.
-- `[ ]` Add client or browser tests for imported stylesheet reloads.
-- `[~]` Add UI tests for initial state replay and Sync Options updates.
+- `[x]` Add client or browser tests for image and inline style URL injection.
+- `[x]` Add client or browser tests for imported stylesheet reloads.
+- `[x]` Add UI tests for initial state replay and Sync Options updates.
 - `[x]` Add non-browser unit coverage for `lib/ui/app/ws.ts` late-handler `init` replay, status replay, guarded sends, and reconnect/backoff.
 - `[x]` Add UI server tests for History send/remove/clear actions.
 - `[x]` Add UI server tests for Connections highlight actions.
 - `[x]` Add UI server tests for Remote Debug file toggles, overlay grid CSS, no-cache, and latency actions.
 - `[x]` Add UI/server tests for Network Throttle create/destroy actions and a working throttle proxy.
-- `[~]` Add UI/server tests for Overview and Help built-in page parity after the audit.
+- `[x]` Add UI/server tests for Overview and Help built-in page parity after the audit.
 - `[x]` Add plugin-system tests for configured plugin loading, plugin registry state, Plugins UI actions, namespaced UI events, middleware hooks, and served client files.
 - `[x]` Add plugin-system tests for `client:events`, plugin UI page metadata/routes, `plugins:opts` UI state updates, external `plugins:configure` UI state updates, cwd-relative ESM package plugins, absolute CommonJS plugins, query option merging, and middleware ordering.
-- `[ ]` Add browser rendering tests for built-in UI pages and browser-client remote-debug DOM injection.
+- `[x]` Add browser rendering tests for built-in UI pages and browser-client remote-debug DOM injection.
+- `[x]` Add Playwright as the browser parity harness with explicit per-test timeouts and scripts that cannot hang indefinitely.
+- `[x]` Add an initial Chromium smoke test proving a static HTML page receives the injected BrowserSync client and connects over the browser WebSocket.
+- `[x]` Port the legacy top-level Playwright example coverage from `.legacy/tests/examples/`, including direct CSS injection, HTTP-triggered reload, imported stylesheet refresh, image refresh, remote debug CSS injection, and notify overlay visibility.
+- `[x]` Port applicable legacy BrowserSync Protractor tests from `.legacy/packages/browser-sync/test/protractor/tests/` to Playwright: scroll sync, click/navigation mirroring, server interactions, snippet injection, base URL handling, and socket script behavior.
+- `[x]` Exclude legacy proxy and HTTPS Protractor cases from the port because proxy/HTTPS handling is intentionally omitted in this rewrite.
+- `[x]` Port applicable legacy UI Protractor tests from `.legacy/packages/browser-sync-ui/test/client/e2e/tests/` to Playwright: overview/home, history, plugins, remote debug, network throttle, and sync-options behavior.
+- `[x]` Review legacy browser-client Karma/Mocha tests under `.legacy/packages/browser-sync-client/test/client-new/` and port browser-dependent behavior to Playwright where real DOM/browser behavior matters; keep pure protocol/state checks as Node tests.
 
 Progress notes:
 
@@ -286,6 +297,10 @@ Progress notes:
 - 2026-05-26: Added plugin-system fixture coverage for inline plugins, package/string plugins, query/options merging, UI registry state, Plugins UI actions, namespaced UI events, `serveFile`, `addMiddleware`, `removeMiddleware`, middleware hooks, client JS hooks, client element hooks, and cleanup tasks.
 - 2026-05-26: Added plugin-system coverage for legacy `client:events` relays, plugin page metadata/routes, reflected `plugins:opts` and external `plugins:configure` UI updates, cwd-relative ESM packages, absolute CommonJS modules, and middleware registration ordering.
 - 2026-05-26: Validation passed with `npm run test:lint`, `npm run build`, and `npm run test:node-test` (`--test-timeout=10000`, 111 passing).
+- 2026-05-26: Browser parity testing target is now Playwright. Applicable legacy Selenium/Protractor and Karma browser-client behavior should be ported to Playwright rather than preserving old browser-test dependencies; intentionally omitted proxy/HTTPS cases stay excluded.
+- 2026-05-26: Added `@playwright/test`, a Chromium-only `playwright.config.ts`, a `browser-tests/` static browser fixture, and a first Playwright smoke test for snippet injection plus browser-client WebSocket connection. The smoke test passes with `npm run test:playwright -- --project=chromium` and `--timeout=10000`. Browser tests intentionally live outside `tests/` so Node's test runner does not discover them.
+- 2026-05-26: Expanded Chromium Playwright coverage to 16 browser tests for direct and HTTP-triggered stylesheet injection, imported stylesheet refreshes, image and inline-style image cache-busting, notification overlay rendering, document scroll loop suppression, mapped element scroll, click `tagName + index` targeting, link/navigation mirroring, text/toggle/select/reset/submit form sync, built-in UI page rendering, Sync Options live mutation, History send/remove/clear, Remote Debug DOM injection, Network Throttle UI create/destroy, and plugin UI/page rendering.
+- 2026-05-26: Hardened browser-test cleanup by closing browser pages and forcing idle/all HTTP connection shutdown during server/UI `exit()`. Validation passed with `npm run test:playwright -- --project=chromium` (`--timeout=10000`, 16 passing).
 
 ## 11. Fastify Route Typing And Hypermedia UI Migration
 
@@ -383,6 +398,10 @@ Progress notes:
 - Remote Debug and Overlay Grid UI: `.legacy/packages/browser-sync-ui/lib/plugins/remote-debug/`
 - Overview UI: `.legacy/packages/browser-sync-ui/lib/plugins/overview/`
 - Help UI: `.legacy/packages/browser-sync-ui/lib/plugins/help/`
+- Legacy Playwright examples: `.legacy/tests/examples/`
+- Legacy BrowserSync Protractor tests: `.legacy/packages/browser-sync/test/protractor/tests/`
+- Legacy UI Protractor tests: `.legacy/packages/browser-sync-ui/test/client/e2e/tests/`
+- Legacy browser-client Karma tests: `.legacy/packages/browser-sync-client/test/client-new/`
 - Fastify type providers: https://fastify.dev/docs/v5.6.x/Reference/Type-Providers/
 - `@fastify/view` / point-of-view: https://github.com/fastify/point-of-view
 - Handlebars guide: https://handlebarsjs.com/guide/

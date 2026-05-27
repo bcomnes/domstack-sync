@@ -668,6 +668,8 @@ export async function createServer (opts: BsOptions): Promise<BsInstance> {
       await Promise.all(Array.from(throttleServers.values()).map(server => server.close()))
       await Promise.all(cleanupTasks.map(task => task()))
       await sockets.close()
+      fastify.server.closeIdleConnections?.()
+      fastify.server.closeAllConnections?.()
       await fastify.close()
     },
     pause () { paused = true },

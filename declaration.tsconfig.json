@@ -15,6 +15,7 @@
     "coverage",
     ".github",
     ".legacy",
+    "browser-tests",
     "lib/client",
     "lib/ui/app",
     "dist"

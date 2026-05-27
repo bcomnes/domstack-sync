@@ -8,3 +8,4 @@ lcov.info
 lib/client/dist/
 lib/ui/public/app.js
 lib/ui/public/app.css
+test-results
