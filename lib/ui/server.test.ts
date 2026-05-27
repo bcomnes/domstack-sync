@@ -210,6 +210,81 @@ test('createUiServer: initial state includes overview mode metadata', { timeout:
   assert.strictEqual(data.tunnelUrl, null)
 })
 
+test('createUiServer: renders Handlebars pages with HTMX actions', { timeout: 10000 }, async (t) => {
+  const uiPort = await findFreePort(0)
+  const ui = await createUiServer({
+    uiPort,
+    serverUrl: 'http://localhost:3000',
+    uiUrl: `http://localhost:${uiPort}`,
+    localIp: '127.0.0.1',
+    mainPort: 3000,
+    mode: 'server',
+    serverBaseDirs: ['/tmp/project/public'],
+    events: new EventEmitter(),
+    getConnections: () => [],
+    getRuntimeOptions: defaultRuntimeOptions,
+    setRuntimeOptions: defaultRuntimeOptions,
+    sendBrowserLocation: () => {},
+    highlightClient: () => {},
+    ...defaultUiCallbacks(),
+  })
+  t.after(() => ui.exit())
+
+  const res = await fetch(`http://127.0.0.1:${uiPort}/sync-options`)
+  assert.strictEqual(res.status, 200)
+  const html = await res.text()
+  assert.ok(html.includes('<title>Sync Options - domstack-sync</title>'))
+  assert.ok(html.includes('hx-post="/actions/options"'))
+  assert.ok(html.includes('hx-trigger="bs:state-update from:body"'))
+  assert.ok(html.includes('<script type="module" src="/app.js"></script>'))
+  assert.ok(!html.includes('id="app"'))
+
+  const js = await fetch(`http://127.0.0.1:${uiPort}/app.js`)
+  assert.strictEqual(js.status, 200)
+  assert.ok((await js.text()).includes('htmx'))
+})
+
+test('createUiServer: HTMX options action validates and updates runtime options', { timeout: 10000 }, async (t) => {
+  let options = defaultRuntimeOptions()
+  const uiPort = await findFreePort(0)
+  const ui = await createUiServer({
+    uiPort,
+    serverUrl: 'http://localhost:3000',
+    uiUrl: `http://localhost:${uiPort}`,
+    localIp: '127.0.0.1',
+    mainPort: 3000,
+    events: new EventEmitter(),
+    getConnections: () => [],
+    getRuntimeOptions: () => options,
+    setRuntimeOptions: (patch: ClientRuntimeOptionsPatch) => {
+      options = {
+        ...options,
+        ...patch,
+        ghostMode: applyGhostModePatch(options.ghostMode, patch.ghostMode),
+      }
+      return options
+    },
+    sendBrowserLocation: () => {},
+    highlightClient: () => {},
+    ...defaultUiCallbacks(),
+  })
+  t.after(() => ui.exit())
+
+  const invalid = await fetch(`http://127.0.0.1:${uiPort}/actions/options`, {
+    method: 'POST',
+    body: new URLSearchParams({ key: 'scroll' }),
+  })
+  assert.strictEqual(invalid.status, 400)
+
+  const valid = await fetch(`http://127.0.0.1:${uiPort}/actions/options`, {
+    method: 'POST',
+    body: new URLSearchParams({ kind: 'ghost', key: 'scroll', returnTo: '/sync-options' }),
+  })
+  assert.strictEqual(valid.status, 200)
+  assert.strictEqual(options.ghostMode.scroll, false)
+  assert.ok((await valid.text()).includes('Sync Options'))
+})
+
 test('createUiServer: tracks visited URLs from client updates', { timeout: 10000 }, async (t) => {
   const events = new EventEmitter()
   const uiPort = await findFreePort(0)

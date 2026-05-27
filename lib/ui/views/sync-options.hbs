@@ -1,0 +1,25 @@
+<div class="page">
+  <h1 class="page__title">Sync Options</h1>
+  <div class="card">
+    <h2 class="card__title">Ghost Mode</h2>
+    <ul class="option-list">
+      {{#each syncOptions}}
+        <li class="option-item">
+          <div class="option-item__text">
+            <strong>{{label}}</strong>
+            <span class="option-item__desc">{{description}}</span>
+          </div>
+          <form method="post" action="/actions/options" hx-post="/actions/options" hx-target="#main" hx-swap="innerHTML">
+            <input type="hidden" name="kind" value="{{kind}}">
+            <input type="hidden" name="key" value="{{key}}">
+            <input type="hidden" name="returnTo" value="/sync-options">
+            <label class="toggle">
+              <input class="toggle__input" type="checkbox" name="active" value="true" {{checked active}} onchange="this.form.requestSubmit()">
+              <span class="toggle__track"><span class="toggle__thumb"></span></span>
+            </label>
+          </form>
+        </li>
+      {{/each}}
+    </ul>
+  </div>
+</div>

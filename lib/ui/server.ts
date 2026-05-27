@@ -1,6 +1,11 @@
 import Fastify from 'fastify'
+import type { JsonSchemaToTsProvider } from '@fastify/type-provider-json-schema-to-ts'
 import fastifyStatic from '@fastify/static'
+import fastifyFormbody from '@fastify/formbody'
+import fastifyView from '@fastify/view'
+import handlebars from 'handlebars'
 import { WebSocketServer, WebSocket } from 'ws'
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { EventEmitter } from 'node:events'
@@ -62,16 +67,41 @@ export interface UiInstance {
   exit: () => Promise<void>
 }
 
-const PAGES: Record<string, string> = {
-  '/': 'Overview',
-  '/sync-options': 'Sync Options',
-  '/history': 'History',
-  '/connections': 'Connections',
-  '/remote-debug': 'Remote Debug',
-  '/plugins': 'Plugins',
-  '/network-throttle': 'Network Throttle',
-  '/help': 'Help',
+interface PageDescriptor {
+  path: string
+  title: string
+  template: string
+  order: number
 }
+
+interface NavLink {
+  href: string
+  label: string
+  active: boolean
+  order: number
+}
+
+interface UrlInfo {
+  title: string
+  tagline: string
+  url: string
+  sync: boolean
+  path: string
+}
+
+type FormBody = Record<string, string | string[] | undefined>
+type ViewReply = { view: (template: string, data: unknown) => unknown }
+
+const PAGES: PageDescriptor[] = [
+  { path: '/', title: 'Overview', template: 'overview.hbs', order: 1 },
+  { path: '/sync-options', title: 'Sync Options', template: 'sync-options.hbs', order: 2 },
+  { path: '/history', title: 'History', template: 'history.hbs', order: 3 },
+  { path: '/connections', title: 'Connections', template: 'connections.hbs', order: 4 },
+  { path: '/remote-debug', title: 'Remote Debug', template: 'remote-debug.hbs', order: 5 },
+  { path: '/plugins', title: 'Plugins', template: 'plugins.hbs', order: 6 },
+  { path: '/network-throttle', title: 'Network Throttle', template: 'network-throttle.hbs', order: 7 },
+  { path: '/help', title: 'Help', template: 'help.hbs', order: 8 },
+]
 
 const remoteDebugClientFiles: RemoteDebugClientFile[] = [
   {
@@ -112,43 +142,192 @@ const throttleTargets: NetworkThrottleTarget[] = [
   { active: false, title: 'GPRS (50kbs, 500ms RTT)', id: 'gprs', speed: 5, latency: 250, urls: [], order: 6 },
 ]
 
-function htmlShell (title: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${title} – domstack-sync</title>
-  <link rel="stylesheet" href="/app.css">
-</head>
-<body>
-  <div id="app"></div>
-  <script src="/app.js"></script>
-</body>
-</html>`
-}
+const emptyBodySchema = {
+  type: 'object',
+  additionalProperties: true,
+} as const
+
+const formActionResponseSchema = {
+  200: { type: 'string' },
+} as const
+
+const optionActionSchema = {
+  body: {
+    type: 'object',
+    required: ['kind', 'key'],
+    additionalProperties: false,
+    properties: {
+      kind: { type: 'string', enum: ['ghost', 'form'] },
+      key: { type: 'string' },
+      active: { type: 'string', enum: ['true'] },
+      returnTo: { type: 'string' },
+    },
+  },
+  response: formActionResponseSchema,
+} as const
+
+const pathActionSchema = {
+  body: {
+    type: 'object',
+    required: ['path'],
+    additionalProperties: false,
+    properties: {
+      path: { type: 'string' },
+      returnTo: { type: 'string' },
+    },
+  },
+  response: formActionResponseSchema,
+} as const
+
+const clearActionSchema = {
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      returnTo: { type: 'string' },
+    },
+  },
+  response: formActionResponseSchema,
+} as const
+
+const idActionSchema = {
+  body: {
+    type: 'object',
+    required: ['id'],
+    additionalProperties: false,
+    properties: {
+      id: { type: 'string' },
+      returnTo: { type: 'string' },
+    },
+  },
+  response: formActionResponseSchema,
+} as const
+
+const remoteDebugFileActionSchema = {
+  body: {
+    type: 'object',
+    required: ['name'],
+    additionalProperties: false,
+    properties: {
+      name: { type: 'string' },
+      active: { type: 'string', enum: ['true'] },
+      returnTo: { type: 'string' },
+    },
+  },
+  response: formActionResponseSchema,
+} as const
+
+const remoteDebugActiveActionSchema = {
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      active: { type: 'string', enum: ['true'] },
+      returnTo: { type: 'string' },
+    },
+  },
+  response: formActionResponseSchema,
+} as const
+
+const overlayGridUpdateActionSchema = {
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      size: { type: 'string' },
+      color: { type: 'string' },
+      selector: { type: 'string' },
+      offsetY: { type: 'string' },
+      offsetX: { type: 'string' },
+      vertical: { type: 'string', enum: ['true'] },
+      horizontal: { type: 'string', enum: ['true'] },
+      returnTo: { type: 'string' },
+    },
+  },
+  response: formActionResponseSchema,
+} as const
+
+const latencyActionSchema = {
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      active: { type: 'string', enum: ['true'] },
+      rate: { type: 'string' },
+      returnTo: { type: 'string' },
+    },
+  },
+  response: formActionResponseSchema,
+} as const
+
+const networkThrottleCreateActionSchema = {
+  body: {
+    type: 'object',
+    required: ['targetId'],
+    additionalProperties: false,
+    properties: {
+      targetId: { type: 'string' },
+      port: { type: 'string' },
+      returnTo: { type: 'string' },
+    },
+  },
+  response: formActionResponseSchema,
+} as const
+
+const networkThrottleDestroyActionSchema = {
+  body: {
+    type: 'object',
+    required: ['port'],
+    additionalProperties: false,
+    properties: {
+      port: { type: 'string' },
+      returnTo: { type: 'string' },
+    },
+  },
+  response: formActionResponseSchema,
+} as const
+
+const pluginSetActionSchema = {
+  body: {
+    type: 'object',
+    required: ['name'],
+    additionalProperties: false,
+    properties: {
+      name: { type: 'string' },
+      active: { type: 'string', enum: ['true'] },
+      returnTo: { type: 'string' },
+    },
+  },
+  response: formActionResponseSchema,
+} as const
+
+const pluginSetManyActionSchema = {
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      active: { type: 'string', enum: ['true'] },
+      returnTo: { type: 'string' },
+    },
+  },
+  response: formActionResponseSchema,
+} as const
 
 export async function createUiServer (opts: UiServerOptions): Promise<UiInstance> {
-  const fastify = Fastify({ logger: false })
+  const fastify = Fastify({ logger: false }).withTypeProvider<JsonSchemaToTsProvider>()
   const publicDir = resolve(__dirname, 'public')
+  const viewsDir = resolve(__dirname, 'views')
   let userPlugins: UserPluginState[] = opts.getUserPlugins?.() ?? []
 
-  await fastify.register(fastifyStatic, { root: publicDir, prefix: '/' })
+  registerHandlebarsPartials(viewsDir)
+  registerHandlebarsHelpers()
 
-  // Register a real route for each UI page
-  for (const [path, title] of Object.entries(PAGES)) {
-    fastify.get(path, async (_req, reply) => {
-      reply.header('content-type', 'text/html; charset=utf-8')
-      return reply.send(htmlShell(title))
-    })
-  }
-  for (const page of getPluginPages(userPlugins)) {
-    if (PAGES[page.path]) continue
-    fastify.get(page.path, async (_req, reply) => {
-      reply.header('content-type', 'text/html; charset=utf-8')
-      return reply.send(htmlShell(page.title))
-    })
-  }
+  await fastify.register(fastifyFormbody)
+  await fastify.register(fastifyView, {
+    engine: { handlebars },
+    root: viewsDir,
+  })
+  await fastify.register(fastifyStatic, { root: publicDir, prefix: '/' })
 
   // In-memory state
   let connections: BsClientInfo[] = opts.getConnections()
@@ -163,6 +342,124 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
     targets: throttleTargets.map(target => ({ ...target, urls: [] })),
     servers: {},
   }
+
+  // Register a real route for each UI page.
+  for (const page of PAGES) {
+    fastify.get(page.path, { schema: { response: { 200: { type: 'string' } } } }, async (_req, reply) => {
+      return renderFullPage(page.path, reply)
+    })
+  }
+  for (const page of getPluginPages(userPlugins)) {
+    if (PAGES.some(builtInPage => builtInPage.path === page.path)) continue
+    fastify.get(page.path, { schema: { response: { 200: { type: 'string' } } } }, async (_req, reply) => {
+      return renderFullPage(page.path, reply)
+    })
+  }
+
+  fastify.post('/actions/options', { schema: optionActionSchema }, async (req, reply) => {
+    const body = req.body
+    setOptionFromForm(body.kind, body.key, formBoolean(body))
+    return renderActionTarget(body, '/sync-options', reply)
+  })
+
+  fastify.post('/actions/history/send', { schema: pathActionSchema }, async (req, reply) => {
+    opts.sendBrowserLocation(makeBrowserLocationMessage(req.body.path, opts.serverUrl))
+    return renderActionTarget(req.body, '/history', reply)
+  })
+
+  fastify.post('/actions/history/remove', { schema: pathActionSchema }, async (req, reply) => {
+    removeHistoryPath(req.body.path)
+    return renderActionTarget(req.body, '/history', reply)
+  })
+
+  fastify.post('/actions/history/clear', { schema: clearActionSchema }, async (req, reply) => {
+    visitedPaths = []
+    broadcastUpdate({ history: [] })
+    return renderActionTarget(req.body, '/history', reply)
+  })
+
+  fastify.post('/actions/connections/highlight', { schema: idActionSchema }, async (req, reply) => {
+    opts.highlightClient(req.body.id)
+    return renderActionTarget(req.body, '/connections', reply)
+  })
+
+  fastify.post('/actions/remote-debug/file', { schema: remoteDebugFileActionSchema }, async (req, reply) => {
+    setRemoteDebugFile(req.body.name, formBoolean(req.body))
+    return renderActionTarget(req.body, '/remote-debug', reply)
+  })
+
+  fastify.post('/actions/remote-debug/overlay-grid', { schema: remoteDebugActiveActionSchema }, async (req, reply) => {
+    setOverlayGrid(formBoolean(req.body))
+    return renderActionTarget(req.body, '/remote-debug', reply)
+  })
+
+  fastify.post('/actions/remote-debug/overlay-grid/update', { schema: overlayGridUpdateActionSchema }, async (req, reply) => {
+    const patch: Partial<OverlayGridState> = {
+      vertical: formBoolean(req.body, 'vertical'),
+      horizontal: formBoolean(req.body, 'horizontal'),
+    }
+    if (req.body.size !== undefined) patch.size = req.body.size
+    if (req.body.color !== undefined) patch.color = req.body.color
+    if (req.body.selector !== undefined) patch.selector = req.body.selector
+    if (req.body.offsetY !== undefined) patch.offsetY = req.body.offsetY
+    if (req.body.offsetX !== undefined) patch.offsetX = req.body.offsetX
+    updateOverlayGrid(patch)
+    return renderActionTarget(req.body, '/remote-debug', reply)
+  })
+
+  fastify.post('/actions/remote-debug/no-cache', { schema: remoteDebugActiveActionSchema }, async (req, reply) => {
+    remoteDebug = { ...remoteDebug, noCache: { active: formBoolean(req.body) } }
+    opts.setNoCache(remoteDebug.noCache.active)
+    broadcastUpdate({ remoteDebug: cloneRemoteDebug(remoteDebug) })
+    return renderActionTarget(req.body, '/remote-debug', reply)
+  })
+
+  fastify.post('/actions/remote-debug/latency', { schema: latencyActionSchema }, async (req, reply) => {
+    remoteDebug = {
+      ...remoteDebug,
+      latency: {
+        active: formBoolean(req.body),
+        rate: parseNumber(req.body.rate, remoteDebug.latency.rate),
+      },
+    }
+    opts.setLatency(remoteDebug.latency.active ? remoteDebug.latency.rate * 1000 : 0)
+    broadcastUpdate({ remoteDebug: cloneRemoteDebug(remoteDebug) })
+    return renderActionTarget(req.body, '/remote-debug', reply)
+  })
+
+  fastify.post('/actions/network-throttle/create', { schema: networkThrottleCreateActionSchema }, async (req, reply) => {
+    await createNetworkThrottleServer(req.body.targetId, req.body.port ?? '')
+    return renderActionTarget(req.body, '/network-throttle', reply)
+  })
+
+  fastify.post('/actions/network-throttle/destroy', { schema: networkThrottleDestroyActionSchema }, async (req, reply) => {
+    await destroyNetworkThrottleServer(Number(req.body.port))
+    return renderActionTarget(req.body, '/network-throttle', reply)
+  })
+
+  fastify.post('/actions/plugins/set', { schema: pluginSetActionSchema }, async (req, reply) => {
+    const plugin = userPlugins.find(item => item.name === req.body.name)
+    if (plugin) setUserPlugin({ ...plugin, active: formBoolean(req.body) })
+    return renderActionTarget(req.body, '/plugins', reply)
+  })
+
+  fastify.post('/actions/plugins/set-many', { schema: pluginSetManyActionSchema }, async (req, reply) => {
+    setManyUserPlugins(formBoolean(req.body))
+    return renderActionTarget(req.body, '/plugins', reply)
+  })
+
+  fastify.post('/actions/ui-event', { schema: { body: emptyBodySchema, response: formActionResponseSchema } }, async (req, reply) => {
+    const event = req.body as FormBody
+    const namespace = formString(event['namespace'])
+    if (namespace) {
+      opts.handleUiEvent?.({
+        namespace,
+        event: formString(event['event']),
+        data: formString(event['data']),
+      })
+    }
+    return renderActionTarget(event, '/plugins', reply)
+  })
 
   function buildState (): UiState {
     return {
@@ -185,7 +482,6 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
     }
   }
 
-  // WebSocket server for UI clients
   const wss = new WebSocketServer({ noServer: true })
 
   function broadcastUpdate (data: Partial<UiState>): void {
@@ -202,56 +498,13 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
     ws.on('message', (data) => {
       try {
         const msg = JSON.parse(data.toString()) as UiClientMessage
-        if (msg.type === 'options:set') {
-          const options = opts.setRuntimeOptions(msg.data)
-          broadcastUpdate({ options })
-        } else if (msg.type === 'history:send-all') {
-          opts.sendBrowserLocation(makeBrowserLocationMessage(msg.path, opts.serverUrl))
-        } else if (msg.type === 'history:remove') {
-          removeHistoryPath(msg.path)
-        } else if (msg.type === 'history:clear') {
-          visitedPaths = []
-          broadcastUpdate({ history: [] })
-        } else if (msg.type === 'connection:highlight') {
-          opts.highlightClient(msg.id)
-        } else if (msg.type === 'remote-debug:file') {
-          setRemoteDebugFile(msg.name, msg.active)
-        } else if (msg.type === 'remote-debug:overlay-grid') {
-          setOverlayGrid(msg.active)
-        } else if (msg.type === 'remote-debug:overlay-grid:update') {
-          updateOverlayGrid(msg.data)
-        } else if (msg.type === 'remote-debug:no-cache') {
-          remoteDebug = { ...remoteDebug, noCache: { active: msg.active } }
-          opts.setNoCache(msg.active)
-          broadcastUpdate({ remoteDebug: cloneRemoteDebug(remoteDebug) })
-        } else if (msg.type === 'remote-debug:latency') {
-          remoteDebug = {
-            ...remoteDebug,
-            latency: {
-              active: msg.active,
-              rate: msg.rate ?? remoteDebug.latency.rate,
-            },
-          }
-          opts.setLatency(remoteDebug.latency.active ? remoteDebug.latency.rate * 1000 : 0)
-          broadcastUpdate({ remoteDebug: cloneRemoteDebug(remoteDebug) })
-        } else if (msg.type === 'network-throttle:create') {
-          createNetworkThrottleServer(msg.targetId, msg.port ?? '').catch(() => {})
-        } else if (msg.type === 'network-throttle:destroy') {
-          destroyNetworkThrottleServer(msg.port).catch(() => {})
-        } else if (msg.type === 'plugins:set') {
-          setUserPlugin(msg.plugin)
-        } else if (msg.type === 'plugins:set-many') {
-          setManyUserPlugins(msg.active)
-        } else if (msg.type === 'ui:event') {
-          opts.handleUiEvent?.(msg)
-        }
+        handleUiClientMessage(msg).catch(() => {})
       } catch {
         // Ignore malformed UI client messages.
       }
     })
   })
 
-  // Listen to main BS server events
   opts.events.on('client:connect', (info: BsClientInfo) => {
     connections = [...connections, info]
     broadcastUpdate({ connections })
@@ -291,6 +544,122 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
       await new Promise<void>((resolve, reject) => wss.close(err => err ? reject(err) : resolve()))
       await fastify.close()
     },
+  }
+
+  async function handleUiClientMessage (msg: UiClientMessage): Promise<void> {
+    if (msg.type === 'options:set') {
+      const options = opts.setRuntimeOptions(msg.data)
+      broadcastUpdate({ options })
+    } else if (msg.type === 'history:send-all') {
+      opts.sendBrowserLocation(makeBrowserLocationMessage(msg.path, opts.serverUrl))
+    } else if (msg.type === 'history:remove') {
+      removeHistoryPath(msg.path)
+    } else if (msg.type === 'history:clear') {
+      visitedPaths = []
+      broadcastUpdate({ history: [] })
+    } else if (msg.type === 'connection:highlight') {
+      opts.highlightClient(msg.id)
+    } else if (msg.type === 'remote-debug:file') {
+      setRemoteDebugFile(msg.name, msg.active)
+    } else if (msg.type === 'remote-debug:overlay-grid') {
+      setOverlayGrid(msg.active)
+    } else if (msg.type === 'remote-debug:overlay-grid:update') {
+      updateOverlayGrid(msg.data)
+    } else if (msg.type === 'remote-debug:no-cache') {
+      remoteDebug = { ...remoteDebug, noCache: { active: msg.active } }
+      opts.setNoCache(msg.active)
+      broadcastUpdate({ remoteDebug: cloneRemoteDebug(remoteDebug) })
+    } else if (msg.type === 'remote-debug:latency') {
+      remoteDebug = {
+        ...remoteDebug,
+        latency: {
+          active: msg.active,
+          rate: msg.rate ?? remoteDebug.latency.rate,
+        },
+      }
+      opts.setLatency(remoteDebug.latency.active ? remoteDebug.latency.rate * 1000 : 0)
+      broadcastUpdate({ remoteDebug: cloneRemoteDebug(remoteDebug) })
+    } else if (msg.type === 'network-throttle:create') {
+      await createNetworkThrottleServer(msg.targetId, msg.port ?? '')
+    } else if (msg.type === 'network-throttle:destroy') {
+      await destroyNetworkThrottleServer(msg.port)
+    } else if (msg.type === 'plugins:set') {
+      setUserPlugin(msg.plugin)
+    } else if (msg.type === 'plugins:set-many') {
+      setManyUserPlugins(msg.active)
+    } else if (msg.type === 'ui:event') {
+      opts.handleUiEvent?.(msg)
+    }
+  }
+
+  async function renderFullPage (path: string, reply: ViewReply): Promise<void> {
+    const descriptor = getPage(path)
+    const context = buildPageContext(path)
+    const body = await fastify.view(descriptor.template, context)
+    await reply.view('layout.hbs', { ...context, body })
+  }
+
+  async function renderFragment (path: string, reply: ViewReply): Promise<void> {
+    const descriptor = getPage(path)
+    await reply.view(descriptor.template, buildPageContext(path))
+  }
+
+  async function renderActionTarget (body: { returnTo?: string } | FormBody, fallback: string, reply: ViewReply): Promise<void> {
+    await renderFragment(normalizeReturnPath(formString(body.returnTo) || fallback), reply)
+  }
+
+  function buildPageContext (path: string): Record<string, unknown> {
+    const state = buildState()
+    const page = getPage(path)
+    const pluginPage = state.plugins.find(plugin => normalizePagePath(plugin.page?.path) === path)
+    return {
+      ...state,
+      title: page.title,
+      path,
+      navLinks: getNavLinks(path, state.plugins),
+      urls: getUrlInfos(state),
+      connectionsDisplay: state.connections.map(client => ({
+        ...client,
+        browserLabel: `${client.browser.name}${client.browser.version ? ` ${client.browser.version}` : ''}`,
+        connectedAgo: timeAgo(client.connectedAt),
+      })),
+      historyDisplay: state.history.map(entry => ({
+        ...entry,
+        url: new URL(entry.path, state.serverUrl).href,
+      })),
+      syncOptions: getSyncOptions(state.options),
+      throttleTargets: [...state.networkThrottle.targets].sort((a, b) => a.order - b.order),
+      throttleServers: Object.values(state.networkThrottle.servers).sort((a, b) => a.port - b.port),
+      pluginPage,
+      remoteDebug: state.remoteDebug,
+      networkThrottle: state.networkThrottle,
+    }
+  }
+
+  function getPage (path: string): PageDescriptor {
+    const normalized = normalizePagePath(path) ?? '/'
+    const builtIn = PAGES.find(page => page.path === normalized)
+    if (builtIn) return builtIn
+    const plugin = userPlugins.find(item => normalizePagePath(item.page?.path) === normalized)
+    if (plugin?.page) {
+      return {
+        path: normalized,
+        title: plugin.page.title,
+        template: 'plugin-page.hbs',
+        order: plugin.page.order ?? Number.MAX_SAFE_INTEGER,
+      }
+    }
+    return PAGES[0]!
+  }
+
+  function setOptionFromForm (kind: 'ghost' | 'form', key: string, active: boolean): void {
+    if (kind === 'form') {
+      const options = opts.setRuntimeOptions({ ghostMode: { forms: { [key]: active } } })
+      broadcastUpdate({ options })
+      return
+    }
+    const options = opts.setRuntimeOptions({ ghostMode: { [key]: active } })
+    broadcastUpdate({ options })
   }
 
   function addHistoryPath (path: string): void {
@@ -344,7 +713,7 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
       ...remoteDebug,
       overlayGrid: {
         ...remoteDebug.overlayGrid,
-        ...data,
+        ...removeUndefined(data),
         active: remoteDebug.overlayGrid.active,
       },
     }
@@ -399,6 +768,16 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
   }
 }
 
+function registerHandlebarsPartials (viewsDir: string): void {
+  handlebars.registerPartial('nav', readFileSync(resolve(viewsDir, 'partials/nav.hbs'), 'utf8'))
+}
+
+function registerHandlebarsHelpers (): void {
+  handlebars.registerHelper('checked', (value: unknown) => value ? 'checked' : '')
+  handlebars.registerHelper('selected', (value: unknown) => value ? 'selected' : '')
+  handlebars.registerHelper('json', (value: unknown) => new handlebars.SafeString(JSON.stringify(value)))
+}
+
 function getPluginPages (plugins: UserPluginState[]): BrowserSyncPluginPage[] {
   return plugins
     .map(plugin => plugin.page)
@@ -408,6 +787,71 @@ function getPluginPages (plugins: UserPluginState[]): BrowserSyncPluginPage[] {
       path: page.path.startsWith('/') ? page.path : `/${page.path}`,
     }))
     .sort((a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER) || a.title.localeCompare(b.title))
+}
+
+function getNavLinks (path: string, plugins: UserPluginState[]): NavLink[] {
+  const builtIn = PAGES.map(page => ({
+    href: page.path,
+    label: page.title,
+    active: page.path === path,
+    order: page.order,
+  }))
+  const pluginLinks = getPluginPages(plugins)
+    .filter(page => !PAGES.some(builtInPage => builtInPage.path === page.path))
+    .map(page => ({
+      href: page.path,
+      label: page.title,
+      active: page.path === path,
+      order: page.order ?? Number.MAX_SAFE_INTEGER,
+    }))
+  return [...builtIn, ...pluginLinks].sort((a, b) => a.order - b.order || a.label.localeCompare(b.label))
+}
+
+function getUrlInfos (state: UiState): UrlInfo[] {
+  const externalUrl = `http://${state.localIp}:${state.port}`
+  return [
+    {
+      title: 'Local',
+      tagline: 'URL for the machine running this server',
+      url: state.serverUrl,
+      sync: state.mode !== 'snippet',
+      path: getUrlPath(state.serverUrl, '/'),
+    },
+    {
+      title: 'External',
+      tagline: 'Other devices on the same network',
+      url: externalUrl,
+      sync: state.mode !== 'snippet',
+      path: getUrlPath(externalUrl, '/'),
+    },
+    ...(state.tunnelUrl
+      ? [{
+          title: 'Tunnel',
+          tagline: 'Public URL for remote devices',
+          url: state.tunnelUrl,
+          sync: state.mode !== 'snippet',
+          path: getUrlPath(state.tunnelUrl, '/'),
+        }]
+      : []),
+    {
+      title: 'UI',
+      tagline: 'Control panel for this BrowserSync instance',
+      url: state.uiUrl,
+      sync: false,
+      path: getUrlPath(state.uiUrl, '/'),
+    },
+  ]
+}
+
+function getSyncOptions (options: ClientRuntimeOptions): Array<{ kind: 'ghost' | 'form'; key: string; label: string; description: string; active: boolean }> {
+  return [
+    { kind: 'ghost', key: 'scroll', label: 'Scroll sync', description: 'Synchronise scroll position across browsers', active: options.ghostMode.scroll },
+    { kind: 'ghost', key: 'clicks', label: 'Click sync', description: 'Mirror clicks across browsers', active: options.ghostMode.clicks },
+    { kind: 'ghost', key: 'location', label: 'Location sync', description: 'Send connected browsers to the same URL', active: options.ghostMode.location },
+    { kind: 'form', key: 'inputs', label: 'Text input sync', description: 'Synchronise input and textarea key changes', active: options.ghostMode.forms.inputs },
+    { kind: 'form', key: 'toggles', label: 'Toggle sync', description: 'Synchronise checkbox, radio, and select changes', active: options.ghostMode.forms.toggles },
+    { kind: 'form', key: 'submit', label: 'Submit sync', description: 'Synchronise form submit and reset actions', active: options.ghostMode.forms.submit },
+  ]
 }
 
 function cloneUserPlugins (plugins: UserPluginState[]): UserPluginState[] {
@@ -434,6 +878,17 @@ function normalizeHistoryPath (path: string, serverUrl: string): string {
   } catch {
     return ''
   }
+}
+
+function normalizeReturnPath (path: string): string {
+  const normalized = normalizePagePath(path)
+  return normalized ?? '/'
+}
+
+function normalizePagePath (path: string | undefined): string | null {
+  if (!path) return null
+  const normalized = path.startsWith('/') ? path : `/${path}`
+  return normalized.split('?')[0] || '/'
 }
 
 function makeBrowserLocationMessage (path: string, serverUrl: string): BrowserLocationMessage {
@@ -517,4 +972,39 @@ function getOverlayGridCss (opts: OverlayGridState): string {
 }`
     : ''
   return [selectorPosition, horizontal, vertical].filter(Boolean).join('\n')
+}
+
+function formBoolean (body: { active?: string } | FormBody, key = 'active'): boolean {
+  const value = (body as FormBody)[key]
+  return Array.isArray(value) ? value.includes('true') : value === 'true'
+}
+
+function formString (value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value[0] ?? '' : value ?? ''
+}
+
+function parseNumber (value: string | undefined, fallback: number): number {
+  if (value === undefined) return fallback
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function removeUndefined<T extends Record<string, unknown>> (input: T): Partial<T> {
+  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)) as Partial<T>
+}
+
+function getUrlPath (url: string, fallback: string): string {
+  try {
+    const parsed = new URL(url)
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`
+  } catch {
+    return fallback
+  }
+}
+
+function timeAgo (ts: number): string {
+  const secs = Math.floor((Date.now() - ts) / 1000)
+  if (secs < 60) return `${secs}s ago`
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`
+  return `${Math.floor(secs / 3600)}h ago`
 }

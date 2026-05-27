@@ -71,6 +71,95 @@ interface RuntimeMiddlewareEntry {
   pluginName?: string
 }
 
+const textResponseSchema = {
+  200: { type: 'string' },
+} as const
+
+const okResponseSchema = {
+  200: {
+    type: 'object',
+    required: ['ok'],
+    additionalProperties: false,
+    properties: {
+      ok: { type: 'boolean' },
+    },
+  },
+} as const
+
+const clientJsRouteSchema = {
+  response: textResponseSchema,
+} as const
+
+const remoteDebugAssetRouteSchema = {
+  response: textResponseSchema,
+} as const
+
+const reloadRouteSchema = {
+  body: {
+    anyOf: [
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          files: {
+            anyOf: [
+              { type: 'string' },
+              { type: 'array', items: { type: 'string' } },
+            ],
+          },
+          args: {
+            anyOf: [
+              { type: 'string' },
+              { type: 'array', items: { type: 'string' } },
+            ],
+          },
+        },
+      },
+      { type: 'string' },
+      { type: 'array', items: { type: 'string' } },
+      { type: 'null' },
+    ],
+  },
+  response: okResponseSchema,
+} as const
+
+const legacyHttpProtocolRouteSchema = {
+  querystring: {
+    type: 'object',
+    additionalProperties: true,
+    properties: {
+      method: { type: 'string' },
+      args: {
+        anyOf: [
+          { type: 'string' },
+          { type: 'array', items: { type: 'string' } },
+        ],
+      },
+    },
+  },
+  response: {
+    200: { type: 'string' },
+    404: { type: 'string' },
+    500: { type: 'string' },
+  },
+} as const
+
+const notifyRouteSchema = {
+  body: {
+    anyOf: [
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          message: { type: 'string' },
+        },
+      },
+      { type: 'null' },
+    ],
+  },
+  response: okResponseSchema,
+} as const
+
 export async function createServer (opts: BsOptions): Promise<BsInstance> {
   const logger = createLogger(opts.logLevel)
   const port = await findFreePort(opts.port)
@@ -114,9 +203,9 @@ export async function createServer (opts: BsOptions): Promise<BsInstance> {
   const pluginManager = await BsPluginManager.fromEntries(opts.plugins, opts.cwd)
 
   // Serve the client bundle
-  fastify.get('/__bs/client.js', async (_req, reply) => {
+  fastify.get('/__bs/client.js', { schema: clientJsRouteSchema }, async (_req, reply) => {
     const clientPath = resolve(__dirname, 'client/dist/browser-sync-client.js')
-    const content = readFileSync(clientPath)
+    const content = readFileSync(clientPath, 'utf8')
     reply.header('content-type', 'application/javascript; charset=utf-8')
     return reply.send(content)
   })
@@ -127,20 +216,20 @@ export async function createServer (opts: BsOptions): Promise<BsInstance> {
   ]
 
   for (const asset of remoteDebugAssets) {
-    fastify.get(asset.path, async (_req, reply) => {
+    fastify.get(asset.path, { schema: remoteDebugAssetRouteSchema }, async (_req, reply) => {
       reply.header('content-type', 'text/css; charset=utf-8')
-      return reply.send(readFileSync(asset.file))
+      return reply.send(readFileSync(asset.file, 'utf8'))
     })
   }
 
   // HTTP reload API
-  fastify.post('/__bs/reload', async (req, reply) => {
+  fastify.post('/__bs/reload', { schema: reloadRouteSchema }, async (req, reply) => {
     const body = req.body as { files?: unknown; args?: unknown } | string | string[] | null
     broadcastReloadArg(getReloadArgFromBody(body))
     return reply.send({ ok: true })
   })
 
-  fastify.get('/__browser_sync__', async (req, reply) => {
+  fastify.get('/__browser_sync__', { schema: legacyHttpProtocolRouteSchema }, async (req, reply) => {
     const params = getLegacyHttpProtocolParams(req.url)
 
     if (!params.hasParams) {
@@ -165,7 +254,7 @@ export async function createServer (opts: BsOptions): Promise<BsInstance> {
   })
 
   // HTTP notify API
-  fastify.post('/__bs/notify', async (req, reply) => {
+  fastify.post('/__bs/notify', { schema: notifyRouteSchema }, async (req, reply) => {
     const body = req.body as { message?: string } | null
     const message = typeof body?.message === 'string' ? body.message : ''
     sockets.broadcast({ type: 'notify', message })
@@ -239,7 +328,7 @@ export async function createServer (opts: BsOptions): Promise<BsInstance> {
     }
   })
   for (const asset of pluginManager.getClientJsAssets()) {
-    fastify.get(asset.src, async (_req, reply) => {
+    fastify.get(asset.src, { schema: clientJsRouteSchema }, async (_req, reply) => {
       reply.header('content-type', 'application/javascript; charset=utf-8')
       return reply.send(asset.content)
     })

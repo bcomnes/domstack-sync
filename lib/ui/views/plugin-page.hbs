@@ -1,0 +1,12 @@
+<div class="page">
+  <div class="card__header">
+    <h1 class="page__title">{{pluginPage.page.title}}</h1>
+  </div>
+  <div class="card">
+    {{#if pluginPage.markup}}
+      <div class="plugin-markup">{{{pluginPage.markup}}}</div>
+    {{else}}
+      <p class="empty">{{pluginPage.title}}</p>
+    {{/if}}
+  </div>
+</div>

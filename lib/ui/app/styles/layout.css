@@ -18,6 +18,17 @@
   white-space: nowrap;
 }
 
+.nav .connection-status {
+  margin-bottom: 0;
+  min-width: 98px;
+  padding: 3px 8px;
+  text-align: center;
+}
+
+.connection-status--connected { color: var(--green); }
+.connection-status--connecting,
+.connection-status--disconnected { color: var(--text-muted); }
+
 .nav__links {
   display: flex;
   gap: 4px;
@@ -79,6 +90,10 @@
 .url-item__title { font-size: 13px; font-weight: 600; }
 .url-item__tagline { color: var(--text-muted); font-size: 12px; margin-bottom: 2px; }
 .url-item__actions { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.url-item__actions form,
+.history-item__actions form {
+  display: inline-flex;
+}
 .url-link { color: var(--accent); }
 .lede { color: var(--text-muted); margin-bottom: 12px; }
 
@@ -147,6 +162,10 @@
 .button:hover { background: var(--bg-hover); }
 .button--subtle { color: var(--text-muted); }
 .button--icon { width: 28px; padding: 0; font-weight: 600; }
+
+form {
+  margin: 0;
+}
 
 .option-item {
   display: flex;

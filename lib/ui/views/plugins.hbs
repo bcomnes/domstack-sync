@@ -1,0 +1,45 @@
+<div class="page">
+  <div class="card__header">
+    <h1 class="page__title">Plugins</h1>
+    {{#if plugins.length}}
+      <div class="history-item__actions">
+        <form method="post" action="/actions/plugins/set-many" hx-post="/actions/plugins/set-many" hx-target="#main" hx-swap="innerHTML">
+          <input type="hidden" name="active" value="true">
+          <input type="hidden" name="returnTo" value="/plugins">
+          <button class="button" type="submit">Enable All</button>
+        </form>
+        <form method="post" action="/actions/plugins/set-many" hx-post="/actions/plugins/set-many" hx-target="#main" hx-swap="innerHTML">
+          <input type="hidden" name="returnTo" value="/plugins">
+          <button class="button button--subtle" type="submit">Disable All</button>
+        </form>
+      </div>
+    {{/if}}
+  </div>
+  <div class="card">
+    {{#if plugins.length}}
+      <ul class="option-list">
+        {{#each plugins}}
+          <li class="option-item">
+            <div class="option-item__text">
+              <strong>{{title}}</strong>
+              {{#if markup}}
+                <div class="plugin-markup">{{{markup}}}</div>
+              {{/if}}
+            </div>
+            <form method="post" action="/actions/plugins/set" hx-post="/actions/plugins/set" hx-target="#main" hx-swap="innerHTML">
+              <input type="hidden" name="name" value="{{name}}">
+              <input type="hidden" name="returnTo" value="/plugins">
+              <label class="toggle">
+                <input class="toggle__input" type="checkbox" name="active" value="true" {{checked active}} onchange="this.form.requestSubmit()">
+                <span class="toggle__track"><span class="toggle__thumb"></span></span>
+              </label>
+            </form>
+          </li>
+        {{/each}}
+      </ul>
+    {{else}}
+      <p class="empty">No user plugins loaded.</p>
+      <p class="hint">External plugin management is ready for configured user plugins.</p>
+    {{/if}}
+  </div>
+</div>

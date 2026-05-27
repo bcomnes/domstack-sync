@@ -29,6 +29,7 @@ When completing work, update both the checkbox and the "Progress notes" for the 
 | UI built-in feature parity | `[x]` | Codex | Default shipped UI pages were audited against legacy plugin pages and are functional; browser rendering parity tests remain tracked in Section 10. |
 | Plugin system parity | `[x]` | Codex | Modern plugin manager supports configured plugins, lifecycle, active state, legacy hooks, client events, UI metadata/pages, UI events, option mutation, package resolution, and middleware/file helpers via `@fastify/middie`. |
 | Parity test coverage | `[~]` | Codex | Added socket runtime/path/event tests, reload decision tests, watcher buffered-batch/throttle tests, UI action tests, plugin-system parity tests, and server smoke tests. Browser rendering/client behavior parity tests remain. |
+| Fastify route typing and hypermedia UI migration | `[x]` | Codex | Production Fastify routes now use JSON Schema/type-provider coverage; the UI shell/pages moved to `@fastify/view` + Handlebars + HTMX 4 beta from npm; Preact/HTM were removed. |
 
 ## 1. UI Connection Stability
 
@@ -286,6 +287,72 @@ Progress notes:
 - 2026-05-26: Added plugin-system coverage for legacy `client:events` relays, plugin page metadata/routes, reflected `plugins:opts` and external `plugins:configure` UI updates, cwd-relative ESM packages, absolute CommonJS modules, and middleware registration ordering.
 - 2026-05-26: Validation passed with `npm run test:lint`, `npm run build`, and `npm run test:node-test` (`--test-timeout=10000`, 111 passing).
 
+## 11. Fastify Route Typing And Hypermedia UI Migration
+
+Goal: strengthen server route typing and simplify the UI by moving from a Preact-first client app to server-rendered Handlebars views enhanced with HTMX 4.
+
+Planning references:
+
+- Fastify type providers: `@fastify/type-provider-json-schema-to-ts` infers request types from inline JSON Schema and must be applied per Fastify encapsulation scope.
+- Fastify view rendering: the `point-of-view` repository now documents the `@fastify/view` package, which decorates `reply` with `view` / `viewAsync`, supports Handlebars, root templates, default context, and layouts.
+- Handlebars: use escaped `{{expression}}` output by default, reserve triple-stash only for trusted HTML such as legacy plugin markup, and register reusable partials for shared layout/navigation/page fragments.
+- HTMX 4 beta: install from npm with `npm install htmx.org@4.0.0-beta4`; serve or bundle the local npm asset instead of relying on a CDN.
+
+Route typing plan:
+
+- `[x]` Audit every `fastify.get`, `fastify.post`, and `fastify.use` integration in `lib/server.ts`, `lib/ui/server.ts`, and plugin/runtime route helpers.
+- `[x]` Ensure every Fastify instance and encapsulated Fastify scope uses `.withTypeProvider<JsonSchemaToTsProvider>()`; the main server already does this, but the UI server and any future route modules must also opt in.
+- `[x]` Add JSON Schema objects for all fixed Fastify routes, covering `params`, `querystring`, `body`, and `response` where applicable.
+- `[x]` Use `as const` route schemas or shared readonly schema constants so `json-schema-to-ts` preserves literal types.
+- `[x]` Replace request body/query/path casts in handlers with inferred types from the route schemas.
+- `[x]` Add schemas for legacy HTTP reload query params, modern reload/notify bodies, UI action POST bodies, throttle requests, plugin UI event payload envelopes, and static asset response metadata where practical.
+- `[x]` For runtime/plugin middleware routes with user-provided handlers, document the boundary and keep typed schemas around the fixed wrapper routes without pretending arbitrary plugin middleware has a known body/response shape.
+- `[x]` Add route validation tests for representative invalid payloads and keep existing behavior tests passing.
+
+Handlebars and `@fastify/view` plan:
+
+- `[x]` Install `@fastify/view` and `handlebars`.
+- `[x]` Register `@fastify/view` in `lib/ui/server.ts` with `engine: { handlebars }`, a dedicated `root`, a shared layout, and default context for static asset URLs, active nav, server metadata, and version info.
+- `[x]` Create `lib/ui/views/` with a layout, page templates, and partials for navigation, connection status, option rows, history rows, plugin rows, remote-debug controls, and network-throttle rows.
+- `[x]` Replace `htmlShell()` and hand-built UI HTML strings with `reply.view()` calls for full page routes.
+- `[x]` Add partial-rendering routes for HTMX requests so controls can update only the affected page fragment.
+- `[x]` Register small Handlebars helpers only where needed, such as equality checks, selected/checked attributes, JSON serialization for safe data attributes, and deterministic class composition.
+- `[x]` Keep legacy plugin-provided markup support, but treat it as trusted plugin HTML and isolate it from normal escaped template data.
+
+HTMX 4 beta UI plan:
+
+- `[x]` Install `htmx.org@4.0.0-beta4` from npm and serve or bundle the local asset from `node_modules`; do not use CDN URLs.
+- `[x]` Replace Preact-driven UI form actions with HTMX request attributes: Sync Options toggles, History send/remove/clear, Connections highlight, Remote Debug toggles/grid updates, Network Throttle create/destroy, and Plugins enable/disable.
+- `[x]` Define server endpoints that return Handlebars-rendered fragments for each HTMX interaction, keeping the same server-side state mutation paths already used by the WebSocket UI.
+- `[x]` Preserve live connection state updates without making Preact the default UI layer. Prefer a tiny non-framework script that receives server events and triggers HTMX refreshes, or HTMX extension-based updates if the beta API is stable enough.
+- `[x]` Keep the browser-client sync WebSocket separate from UI rendering concerns; this migration only changes the Settings/UI surface.
+- `[x]` Re-check HTMX 4 migration details before implementation, especially explicit attribute inheritance and response swap behavior, because the beta can still change.
+
+Preact usage rule:
+
+- `[x]` Treat Preact as opt-in, not the default UI shell.
+- `[x]` Remove the current monolithic Preact UI app once the Handlebars/HTMX routes cover the same behavior.
+- `[x]` Keep or reintroduce Preact only for a specific component that clearly benefits from functional reactive templating, complex local client state, or high-frequency UI updates that would be awkward with small HTMX fragments.
+- `[x]` If such a component is retained, mount it as an isolated island on that component only and document why it is not better as a Handlebars partial plus HTMX behavior.
+
+Migration test plan:
+
+- `[x]` Add non-browser tests proving typed route schemas reject invalid UI/action payloads and accept valid ones.
+- `[x]` Add server tests for full-page `reply.view()` routes and HTMX fragment routes.
+- `[x]` Add tests proving plugin-provided UI pages and markup still render after the view migration.
+- `[x]` Add build checks proving `htmx.org@4.0.0-beta4` is served from npm-managed assets.
+- `[x]` Keep all tests under explicit timeouts.
+
+Progress notes:
+
+- 2026-05-26: Added this migration plan after checking the current Fastify type-provider docs, the `@fastify/view` / point-of-view docs, Handlebars docs, HTMX 4 docs, and npm availability for `htmx.org@4.0.0-beta4`.
+- 2026-05-26: Implemented route schemas for the main server fixed routes and UI fixed/action routes, moved the UI server to `.withTypeProvider<JsonSchemaToTsProvider>()`, and documented runtime plugin middleware as the intentionally untyped user-handler boundary.
+- 2026-05-26: Replaced the Preact UI shell with `@fastify/view` + Handlebars templates under `lib/ui/views/`, including full-page routes, HTMX form action endpoints, and fragment responses for UI actions.
+- 2026-05-26: Installed and bundled `htmx.org@4.0.0-beta4` from npm through `lib/ui/client.ts`; removed `preact` and `htm` dependencies and deleted the monolithic Preact component tree.
+- 2026-05-26: Preserved the UI WebSocket as a framework-free live update channel that triggers HTMX refresh events, while keeping browser-client sync WebSockets separate from Settings/UI rendering.
+- 2026-05-26: Added non-browser coverage for Handlebars page rendering, HTMX action validation, runtime option mutation fragments, npm-bundled HTMX asset serving, and existing plugin UI page/markup behavior after the migration.
+- 2026-05-26: Validation passed with `npm run test:lint`, `npm run build`, and `npm run test:node-test` (`--test-timeout=10000`, 113 passing). Browser automation was not run because the required Node REPL browser-control tool was unavailable in this session.
+
 ## Recommended Execution Order
 
 1. UI connection stability.
@@ -298,6 +365,7 @@ Progress notes:
 8. UI built-in feature parity.
 9. Plugin system parity.
 10. Broader parity test coverage and cleanup.
+11. Fastify route typing and hypermedia UI migration.
 
 ## Key Legacy References
 
@@ -315,3 +383,8 @@ Progress notes:
 - Remote Debug and Overlay Grid UI: `.legacy/packages/browser-sync-ui/lib/plugins/remote-debug/`
 - Overview UI: `.legacy/packages/browser-sync-ui/lib/plugins/overview/`
 - Help UI: `.legacy/packages/browser-sync-ui/lib/plugins/help/`
+- Fastify type providers: https://fastify.dev/docs/v5.6.x/Reference/Type-Providers/
+- `@fastify/view` / point-of-view: https://github.com/fastify/point-of-view
+- Handlebars guide: https://handlebarsjs.com/guide/
+- HTMX 4 docs: https://four.htmx.org/docs
+- HTMX 4 npm install target: `htmx.org@4.0.0-beta4`
