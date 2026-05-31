@@ -312,7 +312,7 @@ test('BsSockets: broadcast excludes sender', async () => {
   }
 })
 
-test('BsSockets: relay does not forward to clients on a different pathname', async () => {
+test('BsSockets: relay broadcasts path-scoped ghost messages for client-side filtering', async () => {
   const sockets = new BsSockets({ logger: makeLogger() })
   const { url, httpClose } = await startHttpServer(sockets)
 
@@ -328,16 +328,14 @@ test('BsSockets: relay does not forward to clients on a different pathname', asy
     clients.push(ws2)
     await c2Connected
 
-    // ws1 sends on /page-a; ws2 is still on the default '/' pathname
-    // relay should only forward to clients on /page-a — ws2 won't match
-    const ws2Received = new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => resolve(false), 300)
-      ws2.once('message', () => { clearTimeout(timer); resolve(true) })
-    })
-    ws1.send(JSON.stringify({ type: 'scroll', position: { raw: { x: 0, y: 0 }, proportional: 0 }, tagName: 'document', index: 0, mappingIndex: -1, pathname: '/page-a' }))
+    // Browser clients compare the message pathname against their live
+    // window.location.pathname so SPA/history changes cannot stale here.
+    const msg2 = new Promise<string>((resolve) => ws2.once('message', (d) => resolve(d.toString())))
+    const ghostMsg = { type: 'scroll', position: { raw: { x: 0, y: 0 }, proportional: 0 }, tagName: 'document', index: 0, mappingIndex: -1, pathname: '/page-a' }
+    ws1.send(JSON.stringify(ghostMsg))
 
-    const ws2Got = await ws2Received
-    assert.strictEqual(ws2Got, false, 'clients on different pathnames should not receive ghost messages')
+    const m2 = await msg2
+    assert.deepStrictEqual(JSON.parse(m2), ghostMsg)
   } finally {
     await Promise.all(clients.map(terminateWs))
     httpClose()
@@ -345,7 +343,7 @@ test('BsSockets: relay does not forward to clients on a different pathname', asy
   }
 })
 
-test('BsSockets: scroll:element relay stays scoped to matching pathname', async () => {
+test('BsSockets: relays scroll:element ghost messages', async () => {
   const sockets = new BsSockets({ logger: makeLogger() })
   const { url, httpClose } = await startHttpServer(sockets)
 
@@ -414,7 +412,7 @@ test('BsSockets: browser:location broadcasts regardless of current pathname', as
   }
 })
 
-test('BsSockets: form:submit relay stays scoped to matching pathname', async () => {
+test('BsSockets: relays form:submit ghost messages', async () => {
   const sockets = new BsSockets({ logger: makeLogger() })
   const { url, httpClose } = await startHttpServer(sockets)
 
@@ -445,7 +443,7 @@ test('BsSockets: form:submit relay stays scoped to matching pathname', async () 
   }
 })
 
-test('BsSockets: form:reset relay stays scoped to matching pathname', async () => {
+test('BsSockets: relays form:reset ghost messages', async () => {
   const sockets = new BsSockets({ logger: makeLogger() })
   const { url, httpClose } = await startHttpServer(sockets)
 

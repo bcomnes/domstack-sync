@@ -15,6 +15,12 @@ import type {
   UiElementDescriptor,
 } from '../protocol.ts'
 
+let uiElementBaseUrl: string | null = null
+
+export function setUiElementBaseUrl (baseUrl: string | null): void {
+  uiElementBaseUrl = baseUrl
+}
+
 declare global {
   interface HTMLLinkElement {
     __LiveReload_pendingRemoval?: boolean
@@ -413,7 +419,10 @@ export function handleOverlayGridCss (innerHTML: string): void {
 }
 
 function getAbsoluteUrl (src: string): string {
-  return new URL(src, location.href).href
+  const baseUrl = src.startsWith('/') && !src.startsWith('//') && uiElementBaseUrl
+    ? uiElementBaseUrl
+    : location.href
+  return new URL(src, baseUrl).href
 }
 
 export interface ScrollApplyOptions {

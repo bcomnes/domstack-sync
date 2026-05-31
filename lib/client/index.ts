@@ -22,13 +22,15 @@ import {
   handleBrowserLocation,
   isInputSuppressed,
   matchesScrollElementFilter,
+  setUiElementBaseUrl,
 } from './handlers.ts'
 import { openReconnecting } from './reconnect.ts'
-import type { ServerToClientMessage, GhostMessage, ClientRuntimeOptions, ClientInfoMessage } from '../protocol.ts'
+import type { ServerToClientMessage, GhostMessage, ClientRuntimeOptions, ClientInfoMessage, PathScopedGhostMessage } from '../protocol.ts'
 
-const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
 const SCROLL_SUPPRESSION_MS = 1000
 const CLICK_SUPPRESSION_MS = 1000
+const socketOrigin = getSocketOrigin()
+setUiElementBaseUrl(`${socketOrigin.protocol === 'wss:' ? 'https:' : 'http:'}//${socketOrigin.host}`)
 
 let runtimeOptions: ClientRuntimeOptions = {
   ghostMode: {
@@ -63,7 +65,7 @@ let suppressClickUntil = 0
 let lastScrollSentAt = 0
 
 const conn = openReconnecting({
-  url: `${protocol}//${location.host}/__bs`,
+  url: `${socketOrigin.protocol}//${socketOrigin.host}/__bs`,
   onopen: () => {
     log.debug('Connected')
     sendClientInfo()
@@ -77,6 +79,8 @@ const conn = openReconnecting({
       log.warn('Invalid message from server')
       return
     }
+
+    if (isPathScopedGhostMessage(msg) && msg.pathname !== location.pathname) return
 
     switch (msg.type) {
       case 'options': runtimeOptions = msg.data; break
@@ -135,6 +139,27 @@ const conn = openReconnecting({
   },
 })
 
+function getSocketOrigin (): { protocol: 'ws:' | 'wss'; host: string } {
+  const script = document.currentScript
+
+  if (script instanceof HTMLScriptElement && script.src) {
+    try {
+      const scriptUrl = new URL(script.src)
+      return {
+        protocol: scriptUrl.protocol === 'https:' ? 'wss:' : 'ws:',
+        host: scriptUrl.host,
+      }
+    } catch {
+      // Fall through to the page URL if the script URL cannot be parsed.
+    }
+  }
+
+  return {
+    protocol: location.protocol === 'https:' ? 'wss:' : 'ws:',
+    host: location.host,
+  }
+}
+
 function send (msg: GhostMessage): void {
   conn.send(JSON.stringify(msg))
 }
@@ -147,6 +172,19 @@ function sendClientInfo (): void {
     href: location.href,
   }
   conn.send(JSON.stringify(msg))
+}
+
+function isPathScopedGhostMessage (msg: ServerToClientMessage): msg is PathScopedGhostMessage {
+  return 'pathname' in msg && typeof msg.pathname === 'string' && [
+    'scroll',
+    'scroll:element',
+    'click',
+    'input:text',
+    'input:toggles',
+    'form:submit',
+    'form:reset',
+    'input',
+  ].includes(msg.type)
 }
 
 // Ghost mode — scroll sync
@@ -169,7 +207,7 @@ document.addEventListener('click', (e) => {
   const el = e.target as Element
   if (el instanceof HTMLLabelElement && el.htmlFor && document.getElementById(el.htmlFor)) return
   send(getClickMessage(el, location.pathname))
-})
+}, { capture: true })
 
 // Ghost mode — text input sync
 document.addEventListener('keyup', (e) => {

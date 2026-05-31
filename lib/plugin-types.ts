@@ -52,7 +52,7 @@ export interface BrowserSyncPluginApi {
   addMiddleware: (route: string, handle: PluginMiddleware, opts?: PluginMiddlewareOptions) => string | undefined
   removeMiddleware: (id: string) => void
   registerCleanupTask: (fn: () => void | Promise<void>) => void
-  reload: (files?: string[]) => void
+  reload: (files?: string | string[]) => void
   notify: (message: string) => void
   ui: {
     listen: (namespace: string | string[], events: PluginUiEventMap) => void

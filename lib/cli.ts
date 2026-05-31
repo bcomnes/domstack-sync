@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util'
-import { writeFileSync } from 'node:fs'
+import { existsSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { printHelpText } from 'argsclopts'
@@ -15,6 +15,16 @@ const options = {
     type: 'string',
     short: 's',
     help: 'Directory to serve',
+  },
+  watch: {
+    type: 'boolean',
+    short: 'w',
+    help: 'Watch server roots and files',
+  },
+  ignore: {
+    type: 'string',
+    multiple: true,
+    help: 'Ignore patterns for file watchers',
   },
   port: {
     type: 'string',
@@ -58,9 +68,52 @@ const options = {
   },
 } as const
 
-const { values, positionals } = parseArgs({ options, allowPositionals: true })
+const { values, positionals } = parseArgs({
+  args: normalizeOptionalServerArg(process.argv.slice(2)),
+  options,
+  allowPositionals: true,
+})
 
-const command = positionals[0] ?? 'start'
+type CliCommand = 'start' | 'init' | 'reload'
+
+function getCommand (args: string[]): { command: CliCommand; positionals: string[] } {
+  const [first, ...rest] = args
+  if (first === 'init' || first === 'reload' || first === 'start') {
+    return { command: first, positionals: rest }
+  }
+  return { command: 'start', positionals: args }
+}
+
+function normalizeFileArgs (files: string | string[] | undefined, positionalFiles: string[]): string[] {
+  const flagFiles = files === undefined
+    ? []
+    : Array.isArray(files) ? files : [files]
+  return [...flagFiles, ...positionalFiles]
+}
+
+function normalizeOptionalServerArg (args: string[]): string[] {
+  const output: string[] = []
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index]
+    if (arg === undefined) continue
+    output.push(arg)
+    if (arg !== '--server' && arg !== '-s') continue
+
+    const next = args[index + 1]
+    if (next === undefined || next.startsWith('-')) {
+      output.push('.')
+    }
+  }
+  return output
+}
+
+function formatError (err: unknown): string {
+  return err instanceof Error
+    ? err.stack ?? err.message
+    : String(err)
+}
+
+const { command, positionals: commandPositionals } = getCommand(positionals)
 
 if (values.help) {
   await printHelpText({ options, pkgPath })
@@ -78,7 +131,7 @@ if (values.version) {
 if (command === 'init') {
   const config = `// @domstack/sync config
 // https://github.com/bcomnes/browser-sync
-export default {
+module.exports = {
   server: '.',
   files: ['**/*.html', '**/*.css', '**/*.js'],
   port: 3000,
@@ -92,7 +145,17 @@ export default {
 
 if (command === 'reload') {
   const port = values.port ? parseInt(values.port, 10) : 3000
-  const res = await fetch(`http://localhost:${port}/__bs/reload`, { method: 'POST' })
+  const files = normalizeFileArgs(values.files, commandPositionals)
+  const body = files.length > 0 ? JSON.stringify({ files }) : undefined
+  const res = await fetch(`http://localhost:${port}/__bs/reload`, {
+    method: 'POST',
+    ...(body
+      ? {
+          headers: { 'content-type': 'application/json' },
+          body,
+        }
+      : {}),
+  })
   if (res.ok) {
     process.stdout.write('Reload sent\n')
   } else {
@@ -104,21 +167,28 @@ if (command === 'reload') {
 
 // Load bs-config.js from cwd if present
 let fileConfig: BsOptionsInput = {}
-try {
-  const mod = await import(pathToFileURL(resolve(process.cwd(), 'bs-config.js')).href) as { default?: unknown }
-  if (mod.default && typeof mod.default === 'object') {
-    fileConfig = mod.default as BsOptionsInput
+const configPath = resolve(process.cwd(), 'bs-config.js')
+if (existsSync(configPath)) {
+  try {
+    const mod = await import(pathToFileURL(configPath).href) as { default?: unknown }
+    if (mod.default && typeof mod.default === 'object') {
+      fileConfig = mod.default as BsOptionsInput
+    }
+  } catch (err) {
+    process.stderr.write(`Failed to load ${configPath}\n${formatError(err)}\n`)
+    process.exit(1)
   }
-} catch {
-  // No config file — that's fine
 }
 
 // Default: start
+const files = normalizeFileArgs(values.files, commandPositionals)
 const opts = parseOptions({
   ...fileConfig,
   ...(values.server !== undefined ? { server: values.server } : {}),
+  ...(values.watch ? { watch: true } : {}),
+  ...(values.ignore !== undefined ? { ignore: values.ignore } : {}),
   ...(values.port !== undefined ? { port: parseInt(values.port, 10) } : {}),
-  ...(values.files !== undefined ? { files: values.files } : {}),
+  ...(files.length > 0 ? { files } : {}),
   ...(values['no-ui'] ? { ui: false } : {}),
   ...(values['no-notify'] ? { notify: false } : {}),
   ...(values.cors ? { cors: values.cors } : {}),

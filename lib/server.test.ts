@@ -2,8 +2,9 @@ import test from 'node:test'
 import assert from 'node:assert'
 import { WebSocket } from 'ws'
 import { createServer } from './server.ts'
+import { createServer as createPublicServer } from '../index.ts'
 import { parseOptions } from './options.ts'
-import type { Transform } from 'node:stream'
+import { Transform } from 'node:stream'
 import type { BrowserSyncPluginModule, PluginMiddleware } from './plugin-types.ts'
 
 interface TestWebSocket extends WebSocket {
@@ -171,6 +172,141 @@ test('createServer: starts and returns URLs', async (t) => {
   assert.strictEqual(bs.uiUrl, null)
   assert.strictEqual(bs.uiPort, null)
   assert.ok(typeof bs.localIp === 'string')
+})
+
+test('createServer: public API accepts README-style unnormalized options', async (t) => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+
+  const dir = mkdtempSync(join(tmpdir(), 'bs-public-api-'))
+  writeFileSync(join(dir, 'index.html'), '<!doctype html><title>public api</title>')
+
+  const bs = await createPublicServer({
+    server: dir,
+    files: [`${dir}/**/*.html`],
+    port: 0,
+    ui: false,
+    logLevel: 'silent',
+  })
+  t.after(async () => {
+    await bs.exit()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  const res = await fetch(bs.url)
+  assert.strictEqual(res.status, 200)
+  assert.ok((await res.text()).includes('public api'))
+})
+
+test('createServer: legacy server baseDir arrays serve files from later roots', async (t) => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+
+  const first = mkdtempSync(join(tmpdir(), 'bs-server-root-a-'))
+  const second = mkdtempSync(join(tmpdir(), 'bs-server-root-b-'))
+  writeFileSync(join(first, 'index.html'), '<!doctype html><title>first root</title>')
+  writeFileSync(join(second, 'from-second.txt'), 'served from second root')
+
+  const bs = await createServer({
+    port: 0,
+    ui: false,
+    logLevel: 'silent',
+    server: [first, second],
+  } as never)
+  t.after(async () => {
+    await bs.exit()
+    rmSync(first, { recursive: true, force: true })
+    rmSync(second, { recursive: true, force: true })
+  })
+
+  const index = await fetch(bs.url)
+  assert.strictEqual(index.status, 200)
+  assert.ok((await index.text()).includes('first root'))
+
+  const fromSecond = await fetch(`${bs.url}/from-second.txt`)
+  assert.strictEqual(fromSecond.status, 200)
+  assert.strictEqual(await fromSecond.text(), 'served from second root')
+})
+
+test('createServer: legacy server object supports routes and custom index', async (t) => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+
+  const root = mkdtempSync(join(tmpdir(), 'bs-server-object-root-'))
+  const vendor = mkdtempSync(join(tmpdir(), 'bs-server-object-vendor-'))
+  writeFileSync(join(root, 'home.html'), '<!doctype html><title>custom index</title>')
+  writeFileSync(join(vendor, 'dep.js'), 'window.dep = true')
+
+  const bs = await createServer({
+    port: 0,
+    ui: false,
+    logLevel: 'silent',
+    server: {
+      baseDir: root,
+      routes: {
+        '/vendor': vendor,
+      },
+      index: 'home.html',
+    },
+  } as never)
+  t.after(async () => {
+    await bs.exit()
+    rmSync(root, { recursive: true, force: true })
+    rmSync(vendor, { recursive: true, force: true })
+  })
+
+  const index = await fetch(bs.url)
+  assert.strictEqual(index.status, 200)
+  assert.ok((await index.text()).includes('custom index'))
+
+  const route = await fetch(`${bs.url}/vendor/dep.js`)
+  assert.strictEqual(route.status, 200)
+  assert.strictEqual(await route.text(), 'window.dep = true')
+})
+
+test('createServer: object watcher fn is bound to the public instance', { timeout: 10000 }, async (t) => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+
+  const dir = mkdtempSync(join(tmpdir(), 'bs-watch-fn-this-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  const file = join(dir, 'watched.css')
+  writeFileSync(file, 'body {}')
+
+  let callbackThis: unknown
+  let resolveSeen!: (value: { event: string; path: string }) => void
+  const eventSeen = new Promise<{ event: string; path: string }>((resolve) => {
+    resolveSeen = resolve
+  })
+
+  const bs = await createServer({
+    port: 0,
+    ui: false,
+    server: false,
+    logLevel: 'silent',
+    files: [{
+      match: file,
+      options: { ignoreInitial: true },
+      fn: function (this: unknown, event, path) {
+        callbackThis = this
+        resolveSeen({ event, path })
+      },
+    }],
+    reloadDebounce: 50,
+  })
+  t.after(() => bs.exit())
+
+  await new Promise(resolve => setTimeout(resolve, 500))
+  writeFileSync(file, 'body { color: red; }')
+
+  const evt = await withTimeout('object watcher fn event', eventSeen)
+  assert.strictEqual(evt.event, 'change')
+  assert.ok(evt.path.includes('watched.css'))
+  assert.strictEqual(callbackThis, bs)
 })
 
 test('createServer: POST /__bs/reload returns ok', async (t) => {
@@ -356,6 +492,153 @@ test('createServer: HTML static file gets script injected', async (t) => {
   assert.ok(html.includes('/__bs/client.js'), `client.js not referenced, got: ${html}`)
 })
 
+test('createServer: snippet false disables static HTML injection', async (t) => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+
+  const dir = mkdtempSync(join(tmpdir(), 'bs-snippet-disabled-'))
+  writeFileSync(join(dir, 'index.html'), '<html><body><h1>hello</h1></body></html>')
+
+  const bs = await createServer({
+    port: 0,
+    ui: false,
+    logLevel: 'silent',
+    server: dir,
+    snippet: false,
+  } as never)
+  t.after(async () => {
+    await bs.exit()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  const res = await fetch(`${bs.url}/`)
+  assert.strictEqual(res.status, 200)
+  const html = await res.text()
+  assert.ok(!html.includes('__bs_script__'), `script should not be injected, got: ${html}`)
+})
+
+test('createServer: .reload() accepts a single file string', { timeout: 10000 }, async (t) => {
+  const bs = await createServer(makeOpts())
+  const ws = await withTimeout('connect ready websocket', connectReadyWs(bs.url))
+  t.after(async () => {
+    await closeWs(ws)
+    await bs.exit()
+  })
+
+  const message = nextNonOptionsMessage(ws)
+  ;(bs.reload as (files?: string | string[]) => void)('styles.css')
+
+  assert.deepStrictEqual(await withTimeout('receive single string reload', message), {
+    type: 'file-reload',
+    file: {
+      ext: 'css',
+      path: 'styles.css',
+      basename: 'styles.css',
+      event: 'change',
+      type: 'inject',
+    },
+  })
+})
+
+test('createServer: .reload() honors reloadDelay', { timeout: 10000 }, async (t) => {
+  const bs = await createServer(makeOpts({ reloadDelay: 150, reloadDebounce: 0 }))
+  const ws = await withTimeout('connect ready websocket', connectReadyWs(bs.url))
+  t.after(async () => {
+    await closeWs(ws)
+    await bs.exit()
+  })
+
+  bs.reload()
+
+  await withTimeout('verify reloadDelay suppresses immediate reload', expectNoNonOptionsMessage(ws, 75), 1000)
+  assert.deepStrictEqual(await withTimeout('receive delayed reload', nextNonOptionsMessage(ws)), {
+    type: 'reload',
+  })
+})
+
+test('createServer: .reload() honors reloadThrottle', { timeout: 10000 }, async (t) => {
+  const bs = await createServer(makeOpts({ reloadDebounce: 0, reloadThrottle: 500 }))
+  const ws = await withTimeout('connect ready websocket', connectReadyWs(bs.url))
+  t.after(async () => {
+    await closeWs(ws)
+    await bs.exit()
+  })
+
+  const firstReload = nextNonOptionsMessage(ws)
+  bs.reload()
+  assert.deepStrictEqual(await withTimeout('receive first throttled reload', firstReload), {
+    type: 'reload',
+  })
+
+  bs.reload()
+  await withTimeout('verify reloadThrottle suppresses second public reload', expectNoNonOptionsMessage(ws, 300), 1000)
+})
+
+test('createServer: .reload() honors reloadDebounce for file args', { timeout: 10000 }, async (t) => {
+  const bs = await createServer(makeOpts({ reloadDebounce: 100 }))
+  const ws = await withTimeout('connect ready websocket', connectReadyWs(bs.url))
+  t.after(async () => {
+    await closeWs(ws)
+    await bs.exit()
+  })
+
+  bs.reload('a.css')
+  bs.reload('b.css')
+
+  await withTimeout('verify reloadDebounce suppresses immediate file reload', expectNoNonOptionsMessage(ws, 50), 1000)
+  assert.deepStrictEqual(await withTimeout('receive first debounced file reload', nextNonOptionsMessage(ws)), {
+    type: 'file-reload',
+    file: {
+      type: 'inject',
+      ext: 'css',
+      path: 'a.css',
+      basename: 'a.css',
+      event: 'change',
+    },
+  })
+  assert.deepStrictEqual(await withTimeout('receive second debounced file reload', nextNonOptionsMessage(ws)), {
+    type: 'file-reload',
+    file: {
+      type: 'inject',
+      ext: 'css',
+      path: 'b.css',
+      basename: 'b.css',
+      event: 'change',
+    },
+  })
+})
+
+test('createServer: .reload({ stream: true }) returns a Transform stream', { timeout: 10000 }, async (t) => {
+  const bs = await createServer(makeOpts())
+  const ws = await withTimeout('connect ready websocket', connectReadyWs(bs.url))
+  t.after(async () => {
+    await closeWs(ws)
+    await bs.exit()
+  })
+
+  const stream = (bs.reload as unknown as (opts: { stream: true; match: string }) => Transform)({
+    stream: true,
+    match: '**/*.css',
+  })
+  assert.ok(stream instanceof Transform)
+
+  const message = nextNonOptionsMessage(ws)
+  await writeStreamChunks(stream, [{ path: 'styles.css' }, { path: 'app.js' }])
+
+  assert.deepStrictEqual(await withTimeout('receive reload stream arg message', message), {
+    type: 'file-reload',
+    file: {
+      type: 'inject',
+      ext: 'css',
+      path: 'styles.css',
+      basename: 'styles.css',
+      event: 'change',
+    },
+  })
+  await withTimeout('verify reload stream arg respects match option', expectNoNonOptionsMessage(ws), 1000)
+})
+
 test('createServer: .reload() and .notify() do not throw', async (t) => {
   const bs = await createServer(makeOpts())
   t.after(() => bs.exit())
@@ -397,6 +680,10 @@ test('createServer: public plugin middleware helpers work after startup', { time
   assert.strictEqual(res.status, 200)
   assert.strictEqual(await res.text(), 'late middleware')
 
+  res = await withTimeout('fetch late middleware child path', fetch(`${bs.url}/late-plugin-middleware/child`))
+  assert.strictEqual(res.status, 200)
+  assert.strictEqual(await res.text(), 'late middleware')
+
   bs.removeMiddleware(servedId)
   bs.removeMiddleware(middlewareId!)
 
@@ -405,6 +692,21 @@ test('createServer: public plugin middleware helpers work after startup', { time
 
   res = await withTimeout('fetch removed middleware', fetch(`${bs.url}/late-plugin-middleware`))
   assert.strictEqual(res.status, 404)
+})
+
+test('createServer: runtime middleware override keeps prefix route semantics', { timeout: 10000 }, async (t) => {
+  const bs = await createServer(makeOpts())
+  t.after(() => bs.exit())
+
+  const middlewareId = bs.addMiddleware('/override-prefix', (_req, res) => {
+    res.setHeader('content-type', 'text/plain; charset=utf-8')
+    res.end('override prefix hit')
+  }, { override: true })
+  assert.ok(middlewareId)
+
+  const res = await withTimeout('fetch override middleware child path', fetch(`${bs.url}/override-prefix/child`))
+  assert.strictEqual(res.status, 200)
+  assert.strictEqual(await res.text(), 'override prefix hit')
 })
 
 test('createServer: .stream() returns a Transform', async (t) => {

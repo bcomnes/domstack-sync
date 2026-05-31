@@ -106,12 +106,7 @@ export class BsSockets extends EventEmitter {
   relayPathScoped (msg: PathScopedGhostMessage, sender: WebSocket, senderInfo: BsClientInfo): void {
     senderInfo.pathname = msg.pathname
     this.emit('client:update', { ...senderInfo })
-    const data = JSON.stringify(msg)
-    for (const [client, info] of this.clientMap) {
-      if (client !== sender && client.readyState === WebSocket.OPEN && info.pathname === msg.pathname) {
-        client.send(data)
-      }
-    }
+    this.broadcast(msg, sender)
   }
 
   broadcast (msg: ServerToClientMessage, exclude?: WebSocket): void {

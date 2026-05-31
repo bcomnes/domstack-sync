@@ -210,7 +210,7 @@ test('createUiServer: initial state includes overview mode metadata', { timeout:
   assert.strictEqual(data.tunnelUrl, null)
 })
 
-test('createUiServer: renders Handlebars pages with HTMX actions', { timeout: 10000 }, async (t) => {
+test('createUiServer: renders fragtml pages with HTMX actions', { timeout: 10000 }, async (t) => {
   const uiPort = await findFreePort(0)
   const ui = await createUiServer({
     uiPort,
@@ -236,6 +236,7 @@ test('createUiServer: renders Handlebars pages with HTMX actions', { timeout: 10
   assert.ok(html.includes('<title>Sync Options - domstack-sync</title>'))
   assert.ok(html.includes('hx-post="/actions/options"'))
   assert.ok(html.includes('hx-trigger="bs:state-update from:body"'))
+  assert.ok(html.includes('<main'))
   assert.ok(html.includes('<script type="module" src="/app.js"></script>'))
   assert.ok(!html.includes('id="app"'))
 
@@ -282,7 +283,10 @@ test('createUiServer: HTMX options action validates and updates runtime options'
   })
   assert.strictEqual(valid.status, 200)
   assert.strictEqual(options.ghostMode.scroll, false)
-  assert.ok((await valid.text()).includes('Sync Options'))
+  const fragment = await valid.text()
+  assert.ok(fragment.includes('Sync Options'))
+  assert.ok(!fragment.includes('<!DOCTYPE html>'))
+  assert.ok(!fragment.includes('<main'))
 })
 
 test('createUiServer: tracks visited URLs from client updates', { timeout: 10000 }, async (t) => {
@@ -324,6 +328,57 @@ test('createUiServer: tracks visited URLs from client updates', { timeout: 10000
       history: [{ path: '/products?page=1#details', key: 1 }],
     },
   })
+})
+
+test('createUiServer: snippet mode tracks full external history URLs', { timeout: 10000 }, async (t) => {
+  const events = new EventEmitter()
+  const sentLocations: BrowserLocationMessage[] = []
+  const uiPort = await findFreePort(0)
+  const ui = await createUiServer({
+    uiPort,
+    serverUrl: 'http://localhost:3000',
+    uiUrl: `http://localhost:${uiPort}`,
+    localIp: '127.0.0.1',
+    mainPort: 3000,
+    mode: 'snippet',
+    events,
+    getConnections: () => [],
+    getRuntimeOptions: defaultRuntimeOptions,
+    setRuntimeOptions: defaultRuntimeOptions,
+    sendBrowserLocation: (message) => { sentLocations.push(message) },
+    highlightClient: () => {},
+    ...defaultUiCallbacks(),
+  })
+  t.after(() => ui.exit())
+
+  const { ws } = await connectWsWithFirstMessage(`ws://127.0.0.1:${uiPort}/ws`)
+  t.after(() => terminateWs(ws))
+  ws.messages.shift()
+
+  const historyUpdate = nextMessage(ws)
+  events.emit('client:update', {
+    id: 'abc123',
+    ua: 'Browser',
+    connectedAt: Date.now(),
+    pathname: '/products',
+    path: '/products?page=1#details',
+    href: 'http://external.test/products?page=1#details',
+  })
+
+  assert.deepStrictEqual(await historyUpdate, {
+    type: 'update',
+    data: {
+      history: [{ path: 'http://external.test/products?page=1#details', key: 1 }],
+    },
+  })
+
+  ws.send(JSON.stringify({ type: 'history:send-all', path: 'http://external.test/products?page=1#details' }))
+  await new Promise(resolve => setTimeout(resolve, 50))
+  assert.deepStrictEqual(sentLocations, [{
+    type: 'browser:location',
+    override: true,
+    url: 'http://external.test/products?page=1#details',
+  }])
 })
 
 test('createUiServer: history actions send, remove, and clear visited URLs', { timeout: 10000 }, async (t) => {

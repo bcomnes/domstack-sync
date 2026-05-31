@@ -21,9 +21,9 @@ import { getLocalIp } from './ip.ts'
 import { createLogger } from './logger.ts'
 import { createUiServer } from './ui/server.ts'
 import { getReloadDecision } from './reload-decision.ts'
-import { applyGhostModePatch } from './options.ts'
+import { applyGhostModePatch, parseOptions } from './options.ts'
 import { BsPluginManager } from './plugins.ts'
-import type { BsOptions } from './options.ts'
+import type { BsOptions, BsOptionsInput } from './options.ts'
 import type { WatchEvent } from './watcher.ts'
 import type { ClientRuntimeOptions, ClientRuntimeOptionsPatch } from './protocol.ts'
 import type { NetworkThrottleServerInfo, NetworkThrottleTarget, UserPluginState } from './ui/types.ts'
@@ -41,7 +41,7 @@ export interface BsInstance {
   uiPort: number | null
   /** Emits: 'client:connect' (BsClientInfo), 'client:disconnect' (id: string), 'file:change' (WatchEvent) */
   events: EventEmitter
-  reload: (files?: string[]) => void
+  reload: (files?: ReloadArg) => void | Transform
   notify: (message: string) => void
   stream: (opts?: StreamOptions) => Transform
   exit: () => Promise<void>
@@ -59,16 +59,24 @@ export interface StreamOptions {
   once?: boolean
 }
 
+export interface ReloadStreamOptions extends StreamOptions {
+  stream: true
+}
+
 interface StreamChunk {
   path?: string
 }
 
-type ReloadArg = string | string[] | undefined
+type ReloadArg = string | string[] | ReloadStreamOptions | undefined
 
 interface RuntimeMiddlewareEntry {
   id: string
   active: boolean
   pluginName?: string
+}
+
+interface RuntimeMiddlewareOptions extends PluginMiddlewareOptions {
+  exact?: boolean
 }
 
 const textResponseSchema = {
@@ -160,7 +168,8 @@ const notifyRouteSchema = {
   response: okResponseSchema,
 } as const
 
-export async function createServer (opts: BsOptions): Promise<BsInstance> {
+export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): Promise<BsInstance> {
+  const opts = parseOptions(rawOpts)
   const logger = createLogger(opts.logLevel)
   const port = await findFreePort(opts.port)
   const localIp = getLocalIp()
@@ -174,6 +183,7 @@ export async function createServer (opts: BsOptions): Promise<BsInstance> {
   let middlewareId = 0
   let servedFileId = 0
   let configuringPlugin = false
+  const instance = {} as BsInstance
 
   await fastify.register(fastifyMiddie, { hook: 'onRequest' })
 
@@ -198,8 +208,17 @@ export async function createServer (opts: BsOptions): Promise<BsInstance> {
 
   const pkg = JSON.parse(readFileSync(resolve(__dirname, '../package.json'), 'utf8')) as { version: string }
   const snippet = buildSnippet({ port, version: pkg.version })
-  registerInjector(fastify, snippet)
-  const serverRoot = opts.server !== false ? resolve(opts.cwd, opts.server || '.') : null
+  registerInjector(fastify, snippet, {
+    enabled: opts.snippet,
+    whitelist: opts.snippetOptions.whitelist,
+    blacklist: opts.snippetOptions.blacklist,
+    rewriteRules: opts.rewriteRules,
+    ...(opts.snippetOptions.rule ? { rule: opts.snippetOptions.rule } : {}),
+  })
+  const serverRoots = opts.server !== false
+    ? opts.server.baseDir.map(root => resolve(opts.cwd, root))
+    : []
+  const serverRoot = serverRoots[0] ?? null
   const pluginManager = await BsPluginManager.fromEntries(opts.plugins, opts.cwd)
 
   // Serve the client bundle
@@ -225,7 +244,7 @@ export async function createServer (opts: BsOptions): Promise<BsInstance> {
   // HTTP reload API
   fastify.post('/__bs/reload', { schema: reloadRouteSchema }, async (req, reply) => {
     const body = req.body as { files?: unknown; args?: unknown } | string | string[] | null
-    broadcastReloadArg(getReloadArgFromBody(body))
+    scheduleReloadArg(getReloadArgFromBody(body))
     return reply.send({ ok: true })
   })
 
@@ -245,7 +264,7 @@ export async function createServer (opts: BsOptions): Promise<BsInstance> {
       return reply.send(`Public API method \`${params.method ?? ''}\` not found.`)
     }
 
-    broadcastReloadArg(params.args)
+    scheduleReloadArg(params.args)
     reply.header('content-type', 'text/plain; charset=utf-8')
     return reply.send([
       'Called public API method `.reload()`',
@@ -262,11 +281,24 @@ export async function createServer (opts: BsOptions): Promise<BsInstance> {
   })
 
   // Static file serving
-  if (serverRoot !== null) {
+  if (opts.server !== false) {
+    for (const [route, root] of Object.entries(opts.server.routes)) {
+      await fastify.register(fastifyStatic, {
+        root: resolve(opts.cwd, root),
+        prefix: normalizeStaticPrefix(route),
+        decorateReply: false,
+        index: opts.server.index,
+      })
+    }
+
     await fastify.register(fastifyStatic, {
-      root: serverRoot,
+      root: serverRoots,
       prefix: '/',
-      index: ['index.html', 'index.htm'],
+      decorateReply: false,
+      index: opts.server.index,
+      ...(opts.server.directory && serverRoots.length === 1
+        ? { list: { format: 'html' as const, render: renderDirectoryList } }
+        : {}),
     })
   }
 
@@ -363,6 +395,7 @@ export async function createServer (opts: BsOptions): Promise<BsInstance> {
       debounceMs: opts.reloadDebounce,
       watchOptions: opts.watchOptions,
       watchEvents: opts.watchEvents,
+      fnContext: instance,
     })
 
     watcher.on('changes', (batch: WatchEvent[]) => {
@@ -398,7 +431,7 @@ export async function createServer (opts: BsOptions): Promise<BsInstance> {
       mainPort: port,
       mode: serverRoot === null ? 'snippet' : 'server',
       snippet: serverRoot === null ? snippet : null,
-      serverBaseDirs: serverRoot === null ? [] : [serverRoot],
+      serverBaseDirs: serverRoots,
       proxyTarget: null,
       tunnelUrl: null,
       events,
@@ -423,6 +456,10 @@ export async function createServer (opts: BsOptions): Promise<BsInstance> {
   }
 
   let lastFileBroadcastAt = 0
+  let publicReloadDebounceTimer: ReturnType<typeof setTimeout> | null = null
+  let hasPendingPublicReload = false
+  let pendingPublicReloadFiles: string[] | undefined
+  const reloadDelayTimers = new Set<ReturnType<typeof setTimeout>>()
 
   function broadcastFiles (files?: string[]): void {
     if (!opts.codeSync) return
@@ -436,19 +473,45 @@ export async function createServer (opts: BsOptions): Promise<BsInstance> {
     sockets.broadcast({ type: 'reload' })
   }
 
-  function broadcastReloadArg (arg: ReloadArg): void {
-    if (Array.isArray(arg)) {
-      broadcastFiles(arg)
-      return
+  function scheduleReloadArg (arg: ReloadArg): void {
+    const files = getReloadFiles(arg)
+    if (files) {
+      for (const file of files) {
+        events.emit('file:change', { path: file, event: 'change', namespace: 'core', timestamp: Date.now() } satisfies WatchEvent)
+      }
     }
-    if (typeof arg === 'string') {
-      broadcastFiles([arg])
-      return
-    }
-    broadcastFiles()
+    queuePublicReload(files)
   }
 
-  function scheduleFileBroadcast (files: string[]): void {
+  function queuePublicReload (files?: string[]): void {
+    if (!opts.codeSync) return
+
+    if (!hasPendingPublicReload || files === undefined || pendingPublicReloadFiles === undefined) {
+      pendingPublicReloadFiles = files
+    } else {
+      pendingPublicReloadFiles.push(...files)
+    }
+    hasPendingPublicReload = true
+
+    const flush = (): void => {
+      publicReloadDebounceTimer = null
+      if (!hasPendingPublicReload) return
+
+      const files = pendingPublicReloadFiles
+      pendingPublicReloadFiles = undefined
+      hasPendingPublicReload = false
+      scheduleBroadcast(files)
+    }
+
+    if (opts.reloadDebounce > 0) {
+      if (publicReloadDebounceTimer) clearTimeout(publicReloadDebounceTimer)
+      publicReloadDebounceTimer = setTimeout(flush, opts.reloadDebounce)
+    } else {
+      flush()
+    }
+  }
+
+  function scheduleBroadcast (files?: string[]): void {
     if (!opts.codeSync) return
     const now = Date.now()
     if (opts.reloadThrottle > 0 && now - lastFileBroadcastAt < opts.reloadThrottle) return
@@ -456,18 +519,62 @@ export async function createServer (opts: BsOptions): Promise<BsInstance> {
 
     const doBroadcast = (): void => broadcastFiles(files)
     if (opts.reloadDelay > 0) {
-      setTimeout(doBroadcast, opts.reloadDelay)
+      const timer = setTimeout(() => {
+        reloadDelayTimers.delete(timer)
+        doBroadcast()
+      }, opts.reloadDelay)
+      reloadDelayTimers.add(timer)
     } else {
       doBroadcast()
     }
   }
 
-  function doReload (files?: string[]): void {
-    broadcastFiles(files)
+  function scheduleFileBroadcast (files: string[]): void {
+    scheduleBroadcast(files)
+  }
+
+  function doReload (files?: ReloadArg): void | Transform {
+    if (isReloadStreamOptions(files)) return createReloadStream(files)
+    scheduleReloadArg(files)
   }
 
   function doNotify (message: string): void {
     sockets.broadcast({ type: 'notify', message })
+  }
+
+  function createReloadStream (streamOpts: StreamOptions = {}): Transform {
+    const changed: string[] = []
+    const changedBasenames: string[] = []
+    const matcher = streamOpts.match ? picomatch(streamOpts.match, { dot: true }) : null
+    let emitted = false
+
+    return new Transform({
+      objectMode: true,
+      transform (chunk: StreamChunk, _encoding, callback) {
+        const p = chunk?.path ?? ''
+        if (p && (!matcher || matcher(p))) {
+          if (streamOpts.once === true) {
+            if (!emitted) {
+              emitted = true
+              broadcastFiles()
+            }
+          } else {
+            emitted = true
+            changed.push(p)
+            changedBasenames.push(basename(p))
+            events.emit('file:change', { path: p, event: 'change', namespace: 'core', timestamp: Date.now() } satisfies WatchEvent)
+          }
+        }
+        callback(null, chunk)
+      },
+      flush (callback) {
+        if (streamOpts.once !== true && changed.length > 0) {
+          events.emit('stream:changed', { changed: changedBasenames })
+          broadcastFiles(changed)
+        }
+        callback()
+      },
+    })
   }
 
   function createPluginApi (): BrowserSyncPluginApi {
@@ -500,14 +607,14 @@ export async function createServer (opts: BsOptions): Promise<BsInstance> {
     addRuntimeMiddleware(path, (_req, res) => {
       res.setHeader('content-type', props.type)
       res.end(props.content)
-    }, { id, override: true })
+    }, { id, override: true, exact: true })
     return id
   }
 
   function addRuntimeMiddleware (
     route: string,
     handle: PluginMiddleware,
-    middlewareOpts: PluginMiddlewareOptions = {},
+    middlewareOpts: RuntimeMiddlewareOptions = {},
     pluginName?: string
   ): string | undefined {
     const id = middlewareOpts.id ?? `bs-mw-${middlewareId++}`
@@ -524,7 +631,7 @@ export async function createServer (opts: BsOptions): Promise<BsInstance> {
     const wrapped: PluginMiddleware = (req, res, next) => {
       if (!entry.active) return next()
       if (entry.pluginName && pluginManager.getUserPlugin(entry.pluginName)?.active === false) return next()
-      if (middlewareOpts.override === true && normalizedRoute && getMiddlewarePathname(req) !== normalizedRoute) {
+      if (middlewareOpts.exact === true && normalizedRoute && getMiddlewarePathname(req) !== normalizedRoute) {
         return next()
       }
       return handle(req, res, next)
@@ -619,7 +726,7 @@ export async function createServer (opts: BsOptions): Promise<BsInstance> {
     return findFreeThrottlePort(port + 1)
   }
 
-  return {
+  Object.assign(instance, {
     url,
     uiUrl: uiInstance?.uiUrl ?? null,
     localIp,
@@ -628,41 +735,11 @@ export async function createServer (opts: BsOptions): Promise<BsInstance> {
     events,
     reload: doReload,
     notify: doNotify,
-    stream (streamOpts: StreamOptions = {}) {
-      const changed: string[] = []
-      const changedBasenames: string[] = []
-      const matcher = streamOpts.match ? picomatch(streamOpts.match, { dot: true }) : null
-      let emitted = false
-
-      return new Transform({
-        objectMode: true,
-        transform (chunk: StreamChunk, _encoding, callback) {
-          const p = chunk?.path ?? ''
-          if (p && (!matcher || matcher(p))) {
-            if (streamOpts.once === true) {
-              if (!emitted) {
-                emitted = true
-                broadcastFiles()
-              }
-            } else {
-              emitted = true
-              changed.push(p)
-              changedBasenames.push(basename(p))
-              events.emit('file:change', { path: p, event: 'change', namespace: 'core', timestamp: Date.now() } satisfies WatchEvent)
-            }
-          }
-          callback(null, chunk)
-        },
-        flush (callback) {
-          if (streamOpts.once !== true && changed.length > 0) {
-            events.emit('stream:changed', { changed: changedBasenames })
-            broadcastFiles(changed)
-          }
-          callback()
-        },
-      })
-    },
+    stream: createReloadStream,
     async exit () {
+      if (publicReloadDebounceTimer) clearTimeout(publicReloadDebounceTimer)
+      for (const timer of reloadDelayTimers) clearTimeout(timer)
+      reloadDelayTimers.clear()
       await watcher?.close()
       await uiInstance?.exit()
       await Promise.all(Array.from(throttleServers.values()).map(server => server.close()))
@@ -679,7 +756,8 @@ export async function createServer (opts: BsOptions): Promise<BsInstance> {
     serveFile: serveRuntimeFile,
     addMiddleware: addRuntimeMiddleware,
     removeMiddleware: removeRuntimeMiddleware,
-  }
+  } satisfies BsInstance)
+  return instance
 }
 
 async function findFreeThrottlePort (start: number): Promise<number> {
@@ -704,6 +782,16 @@ function tryBindThrottlePort (port: number): Promise<number | null> {
 function getMiddlewarePathname (req: IncomingMessage): string {
   const originalUrl = (req as IncomingMessage & { originalUrl?: string }).originalUrl ?? req.url ?? '/'
   return new URL(originalUrl, 'http://localhost').pathname
+}
+
+function isReloadStreamOptions (arg: ReloadArg): arg is ReloadStreamOptions {
+  return Boolean(arg && typeof arg === 'object' && !Array.isArray(arg) && arg.stream === true)
+}
+
+function getReloadFiles (arg: ReloadArg): string[] | undefined {
+  if (Array.isArray(arg)) return arg
+  if (typeof arg === 'string' && arg !== 'undefined') return [arg]
+  return undefined
 }
 
 function getReloadArgFromBody (body: { files?: unknown; args?: unknown } | string | string[] | null): ReloadArg {
@@ -731,4 +819,31 @@ function getLegacyHttpProtocolParams (url: string): { hasParams: boolean; method
 
 function formatLegacyArg (arg: ReloadArg): string {
   return JSON.stringify(arg) ?? 'undefined'
+}
+
+interface DirectoryListItem {
+  href: string
+  name: string
+}
+
+function normalizeStaticPrefix (route: string): string {
+  const prefixed = route.startsWith('/') ? route : `/${route}`
+  if (prefixed === '/') return '/'
+  return prefixed.endsWith('/') ? prefixed : `${prefixed}/`
+}
+
+function renderDirectoryList (dirs: DirectoryListItem[], files: DirectoryListItem[]): string {
+  const items = [...dirs, ...files]
+    .map(item => `<li><a href="${escapeHtml(item.href)}">${escapeHtml(item.name)}</a></li>`)
+    .join('\n')
+
+  return `<!doctype html><html><body><ul>${items}</ul></body></html>`
+}
+
+function escapeHtml (value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
 }

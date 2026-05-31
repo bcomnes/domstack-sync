@@ -17,6 +17,7 @@ export interface WatcherOptions {
   debounceMs?: number
   watchOptions?: Record<string, unknown>
   watchEvents?: string[]
+  fnContext?: unknown
 }
 
 export class BsWatcher extends EventEmitter {
@@ -39,7 +40,7 @@ export class BsWatcher extends EventEmitter {
       ignoreInitial: true,
       ...opts.watchOptions,
     }
-    if (opts.cwd) defaultWatchOpts['cwd'] = opts.cwd
+    if (opts.cwd && defaultWatchOpts['cwd'] === undefined) defaultWatchOpts['cwd'] = opts.cwd
 
     const globEntries = opts.files.filter((entry): entry is string => typeof entry === 'string')
     if (globEntries.length > 0) {
@@ -49,7 +50,7 @@ export class BsWatcher extends EventEmitter {
     for (const entry of opts.files.filter(isWatchObject)) {
       const watchOpts = entry.options ?? defaultWatchOpts
       const handler = typeof entry.fn === 'function'
-        ? entry.fn
+        ? bindWatchFn(entry.fn, opts.fnContext)
         : this.handleDefaultWatchEvent
       this.watchers.push(this.createWatcher(entry.match, watchOpts, handler))
     }
@@ -92,4 +93,12 @@ export class BsWatcher extends EventEmitter {
 
 function isWatchObject (entry: FileWatchEntry): entry is FileWatchObject {
   return typeof entry === 'object' && entry !== null && 'match' in entry
+}
+
+function bindWatchFn (
+  fn: NonNullable<FileWatchObject['fn']>,
+  context: unknown
+): (event: string, path: string) => void {
+  if (context === undefined) return fn
+  return (event, path) => fn.call(context, event, path)
 }

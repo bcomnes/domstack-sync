@@ -10,6 +10,22 @@ function makeTmpDir () {
   return mkdtempSync(join(tmpdir(), 'bs-watcher-test-'))
 }
 
+function withTimeout<T> (label: string, promise: Promise<T>, ms = 2500): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    promise.then(
+      value => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      err => {
+        clearTimeout(timer)
+        reject(err)
+      }
+    )
+  })
+}
+
 test('BsWatcher: emits change event when file is written', { timeout: 8000 }, async (t) => {
   const dir = makeTmpDir()
   t.after(() => rmSync(dir, { recursive: true, force: true }))
@@ -116,6 +132,34 @@ test('BsWatcher: object watcher without fn uses default change pipeline', { time
   const evt = await changed
   assert.strictEqual(evt.event, 'change')
   assert.ok(evt.path.includes('object-default.css'))
+})
+
+test('BsWatcher: preserves explicit watchOptions.cwd', { timeout: 8000 }, async (t) => {
+  const topLevelCwd = makeTmpDir()
+  const explicitCwd = makeTmpDir()
+  t.after(() => rmSync(topLevelCwd, { recursive: true, force: true }))
+  t.after(() => rmSync(explicitCwd, { recursive: true, force: true }))
+  const file = join(explicitCwd, 'explicit-cwd.css')
+  writeFileSync(file, 'body {}')
+
+  const watcher = new BsWatcher({
+    files: ['explicit-cwd.css'],
+    cwd: topLevelCwd,
+    watchOptions: { cwd: explicitCwd },
+    debounceMs: 50,
+  })
+  t.after(() => watcher.close())
+
+  const changed = new Promise<WatchEvent>((resolve) => {
+    watcher.once('change', resolve)
+  })
+
+  await new Promise(resolve => setTimeout(resolve, 500))
+  writeFileSync(file, 'body { color: red; }')
+
+  const evt = await withTimeout('explicit cwd watcher change', changed)
+  assert.strictEqual(evt.event, 'change')
+  assert.strictEqual(evt.path, 'explicit-cwd.css')
 })
 
 test('BsWatcher: object watcher fn receives raw chokidar events', { timeout: 8000 }, async (t) => {

@@ -27,7 +27,12 @@ test('parseOptions: defaults', () => {
 test('parseOptions: custom values', () => {
   const opts = parseOptions({ port: 4000, server: './public', files: ['**/*.css'] })
   assert.strictEqual(opts.port, 4000)
-  assert.strictEqual(opts.server, './public')
+  assert.deepStrictEqual(opts.server, {
+    baseDir: ['./public'],
+    routes: {},
+    directory: false,
+    index: ['index.html', 'index.htm'],
+  })
   assert.deepStrictEqual(opts.files, ['**/*.css'])
 })
 

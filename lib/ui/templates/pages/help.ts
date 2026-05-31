@@ -1,0 +1,80 @@
+import html from 'fragtml'
+import type { HtmlResult } from 'fragtml/types.js'
+
+export function helpPageTemplate (): HtmlResult {
+  return html`
+    <div class="page">
+      <h1 class="page__title">Help</h1>
+      <div class="card">
+        <h2 class="card__title">Help / About</h2>
+        <div class="help-section">
+          <p class="lede">
+            Browsersync is an open-source project created by
+            <a href="https://twitter.com/shaneOsbourne" target="_blank">Shane Osbourne</a>.
+          </p>
+          <p class="hint">The modern rewrite keeps these UI workflows aligned with the BrowserSync defaults while replacing the legacy dependency stack.</p>
+        </div>
+      </div>
+      <div class="card">
+        <h2 class="card__title">Common questions</h2>
+        <dl class="definition-list">
+          <dt>Why is it not connecting?</dt>
+          <dd>Most connection issues happen when the page does not have a <code>body</code> tag. BrowserSync injects its client script near the closing body tag.</dd>
+          <dt>Which mode should I use?</dt>
+          <dd>
+            <ul>
+              <li>Use server mode for simple HTML, CSS, and JavaScript files.</li>
+              <li>Legacy BrowserSync uses proxy mode when an existing app server owns the response path; this rewrite intentionally omits proxy and HTTPS handling for now.</li>
+              <li>Use snippet mode when you want to paste the client script into a page manually.</li>
+            </ul>
+          </dd>
+          <dt>Where can I report an issue?</dt>
+          <dd>Use the project issue tracker for this rewrite, and use the BrowserSync docs when checking expected legacy behavior.</dd>
+        </dl>
+        <p class="hint">
+          BrowserSync reference:
+          <a href="https://www.browsersync.io/docs/" target="_blank">docs</a>,
+          <a href="https://github.com/BrowserSync/browser-sync/issues" target="_blank">issues</a>,
+          <a href="https://stackoverflow.com/questions/tagged/browser-sync" target="_blank">Stack Overflow</a>.
+        </p>
+      </div>
+      <div class="card">
+        <h2 class="card__title">Quick start</h2>
+        <pre class="code-block">npx domstack-sync --server . --files '**/*.css' '**/*.html'</pre>
+      </div>
+      <div class="card">
+        <h2 class="card__title">CLI options</h2>
+        <dl class="definition-list">
+          <dt><code>--server &lt;dir&gt;</code></dt>
+          <dd>Serve a directory of static files</dd>
+          <dt><code>--files &lt;glob&gt;</code></dt>
+          <dd>Glob patterns to watch for changes (repeatable)</dd>
+          <dt><code>--port &lt;n&gt;</code></dt>
+          <dd>Port to listen on (default: 3000)</dd>
+          <dt><code>--no-ui</code></dt>
+          <dd>Disable this control panel</dd>
+          <dt><code>--no-notify</code></dt>
+          <dd>Disable the browser notification overlay</dd>
+          <dt><code>--no-ghost-mode</code></dt>
+          <dd>Disable scroll/click/form synchronisation</dd>
+          <dt><code>--cors</code></dt>
+          <dd>Enable CORS headers</dd>
+        </dl>
+      </div>
+      <div class="card">
+        <h2 class="card__title">Programmatic API</h2>
+        <pre class="code-block">import { createServer } from '@domstack/sync'
+
+const bs = await createServer({
+  server: './public',
+  files: ['**/*.css', '**/*.html'],
+})
+
+bs.reload()           // trigger full reload
+bs.reload(['a.css'])  // CSS inject
+bs.notify('Updated')  // overlay message
+await bs.exit()       // shutdown</pre>
+      </div>
+    </div>
+  `
+}

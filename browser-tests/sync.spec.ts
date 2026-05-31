@@ -49,6 +49,23 @@ test('mirrors clicks by legacy tagName plus index targeting', async ({ context, 
   await expect(target.locator('body')).not.toHaveAttribute('data-clicked', 'first')
 })
 
+test('ignores path-scoped ghost events after SPA history navigation changes pathname', async ({ context, page, startServer }) => {
+  const bs = await startServer()
+  const target = await context.newPage()
+  await Promise.all([
+    gotoAndWaitForClient(page, bs, '/clicks.html#source'),
+    gotoAndWaitForClient(target, bs, '/clicks.html#target'),
+  ])
+
+  await target.evaluate(() => history.pushState({}, '', '/spa-target.html'))
+  await expect(target).toHaveURL(/\/spa-target\.html/)
+
+  await page.locator('#second-button').click()
+  await page.waitForTimeout(500)
+
+  expect(await target.evaluate(() => document.body.dataset['clicked'] ?? '')).toBe('')
+})
+
 test('mirrors link clicks as browser navigation', async ({ context, page, startServer }) => {
   const bs = await startServer()
   const target = await context.newPage()
@@ -60,6 +77,23 @@ test('mirrors link clicks as browser navigation', async ({ context, page, startS
   await page.locator('#nav-link').click()
 
   await expect(target).toHaveURL(/\/target\.html$/)
+})
+
+test('mirrors clicks when page code stops propagation', async ({ context, page, startServer }) => {
+  const bs = await startServer()
+  const target = await context.newPage()
+  await Promise.all([
+    gotoAndWaitForClient(page, bs, '/clicks.html#source'),
+    gotoAndWaitForClient(target, bs, '/clicks.html#target'),
+  ])
+
+  await page.locator('#second-button').evaluate((button) => {
+    button.addEventListener('click', event => event.stopPropagation())
+  })
+
+  await page.locator('#second-button').click()
+
+  await expect.poll(() => target.evaluate(() => document.body.dataset['clicked'] ?? '')).toBe('second')
 })
 
 test('mirrors text, toggle, select, reset, and submit form behavior', async ({ context, page, startServer }) => {

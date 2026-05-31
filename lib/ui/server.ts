@@ -1,11 +1,9 @@
 import Fastify from 'fastify'
 import type { JsonSchemaToTsProvider } from '@fastify/type-provider-json-schema-to-ts'
+import type { FastifyReply } from 'fastify'
 import fastifyStatic from '@fastify/static'
 import fastifyFormbody from '@fastify/formbody'
-import fastifyView from '@fastify/view'
-import handlebars from 'handlebars'
 import { WebSocketServer, WebSocket } from 'ws'
-import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { EventEmitter } from 'node:events'
@@ -29,6 +27,16 @@ import type {
   UserPluginState,
   UiMode,
 } from './types.ts'
+import {
+  MAIN_FRAGMENT,
+  renderUiFragment,
+  renderUiPage,
+  type NavLink,
+  type PageTemplateName,
+  type SyncOption,
+  type UiTemplateContext,
+  type UrlInfo,
+} from './templates/index.ts'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
@@ -70,37 +78,21 @@ export interface UiInstance {
 interface PageDescriptor {
   path: string
   title: string
-  template: string
+  template: PageTemplateName
   order: number
-}
-
-interface NavLink {
-  href: string
-  label: string
-  active: boolean
-  order: number
-}
-
-interface UrlInfo {
-  title: string
-  tagline: string
-  url: string
-  sync: boolean
-  path: string
 }
 
 type FormBody = Record<string, string | string[] | undefined>
-type ViewReply = { view: (template: string, data: unknown) => unknown }
 
 const PAGES: PageDescriptor[] = [
-  { path: '/', title: 'Overview', template: 'overview.hbs', order: 1 },
-  { path: '/sync-options', title: 'Sync Options', template: 'sync-options.hbs', order: 2 },
-  { path: '/history', title: 'History', template: 'history.hbs', order: 3 },
-  { path: '/connections', title: 'Connections', template: 'connections.hbs', order: 4 },
-  { path: '/remote-debug', title: 'Remote Debug', template: 'remote-debug.hbs', order: 5 },
-  { path: '/plugins', title: 'Plugins', template: 'plugins.hbs', order: 6 },
-  { path: '/network-throttle', title: 'Network Throttle', template: 'network-throttle.hbs', order: 7 },
-  { path: '/help', title: 'Help', template: 'help.hbs', order: 8 },
+  { path: '/', title: 'Overview', template: 'overview', order: 1 },
+  { path: '/sync-options', title: 'Sync Options', template: 'sync-options', order: 2 },
+  { path: '/history', title: 'History', template: 'history', order: 3 },
+  { path: '/connections', title: 'Connections', template: 'connections', order: 4 },
+  { path: '/remote-debug', title: 'Remote Debug', template: 'remote-debug', order: 5 },
+  { path: '/plugins', title: 'Plugins', template: 'plugins', order: 6 },
+  { path: '/network-throttle', title: 'Network Throttle', template: 'network-throttle', order: 7 },
+  { path: '/help', title: 'Help', template: 'help', order: 8 },
 ]
 
 const remoteDebugClientFiles: RemoteDebugClientFile[] = [
@@ -316,17 +308,9 @@ const pluginSetManyActionSchema = {
 export async function createUiServer (opts: UiServerOptions): Promise<UiInstance> {
   const fastify = Fastify({ logger: false }).withTypeProvider<JsonSchemaToTsProvider>()
   const publicDir = resolve(__dirname, 'public')
-  const viewsDir = resolve(__dirname, 'views')
   let userPlugins: UserPluginState[] = opts.getUserPlugins?.() ?? []
 
-  registerHandlebarsPartials(viewsDir)
-  registerHandlebarsHelpers()
-
   await fastify.register(fastifyFormbody)
-  await fastify.register(fastifyView, {
-    engine: { handlebars },
-    root: viewsDir,
-  })
   await fastify.register(fastifyStatic, { root: publicDir, prefix: '/' })
 
   // In-memory state
@@ -363,7 +347,7 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
   })
 
   fastify.post('/actions/history/send', { schema: pathActionSchema }, async (req, reply) => {
-    opts.sendBrowserLocation(makeBrowserLocationMessage(req.body.path, opts.serverUrl))
+    opts.sendBrowserLocation(makeBrowserLocationMessage(req.body.path, opts.serverUrl, opts.mode ?? 'server'))
     return renderActionTarget(req.body, '/history', reply)
   })
 
@@ -517,7 +501,7 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
 
   opts.events.on('client:update', (info: BsClientInfo) => {
     connections = connections.map(c => c.id === info.id ? info : c)
-    addHistoryPath(info.path || info.pathname)
+    addHistoryPath(opts.mode === 'snippet' ? (info.href ?? info.path ?? info.pathname) : (info.path || info.pathname))
     broadcastUpdate({ connections })
   })
 
@@ -553,7 +537,7 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
       const options = opts.setRuntimeOptions(msg.data)
       broadcastUpdate({ options })
     } else if (msg.type === 'history:send-all') {
-      opts.sendBrowserLocation(makeBrowserLocationMessage(msg.path, opts.serverUrl))
+      opts.sendBrowserLocation(makeBrowserLocationMessage(msg.path, opts.serverUrl, opts.mode ?? 'server'))
     } else if (msg.type === 'history:remove') {
       removeHistoryPath(msg.path)
     } else if (msg.type === 'history:clear') {
@@ -594,23 +578,22 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
     }
   }
 
-  async function renderFullPage (path: string, reply: ViewReply): Promise<void> {
+  async function renderFullPage (path: string, reply: FastifyReply): Promise<void> {
     const descriptor = getPage(path)
     const context = buildPageContext(path)
-    const body = await fastify.view(descriptor.template, context)
-    await reply.view('layout.hbs', { ...context, body })
+    sendHtml(reply, renderUiPage(descriptor.template, context))
   }
 
-  async function renderFragment (path: string, reply: ViewReply): Promise<void> {
+  async function renderFragment (path: string, reply: FastifyReply): Promise<void> {
     const descriptor = getPage(path)
-    await reply.view(descriptor.template, buildPageContext(path))
+    sendHtml(reply, renderUiFragment(descriptor.template, buildPageContext(path), MAIN_FRAGMENT))
   }
 
-  async function renderActionTarget (body: { returnTo?: string } | FormBody, fallback: string, reply: ViewReply): Promise<void> {
+  async function renderActionTarget (body: { returnTo?: string } | FormBody, fallback: string, reply: FastifyReply): Promise<void> {
     await renderFragment(normalizeReturnPath(formString(body.returnTo) || fallback), reply)
   }
 
-  function buildPageContext (path: string): Record<string, unknown> {
+  function buildPageContext (path: string): UiTemplateContext {
     const state = buildState()
     const page = getPage(path)
     const pluginPage = state.plugins.find(plugin => normalizePagePath(plugin.page?.path) === path)
@@ -647,7 +630,7 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
       return {
         path: normalized,
         title: plugin.page.title,
-        template: 'plugin-page.hbs',
+        template: 'plugin-page',
         order: plugin.page.order ?? Number.MAX_SAFE_INTEGER,
       }
     }
@@ -665,7 +648,7 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
   }
 
   function addHistoryPath (path: string): void {
-    const normalized = normalizeHistoryPath(path, opts.serverUrl)
+    const normalized = normalizeHistoryPath(path, opts.serverUrl, opts.mode ?? 'server')
     if (!normalized) return
     if (visitedPaths.includes(normalized)) return
     visitedPaths = [...visitedPaths, normalized]
@@ -673,7 +656,7 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
   }
 
   function removeHistoryPath (path: string): void {
-    const normalized = normalizeHistoryPath(path, opts.serverUrl)
+    const normalized = normalizeHistoryPath(path, opts.serverUrl, opts.mode ?? 'server')
     const next = visitedPaths.filter(item => item !== normalized)
     if (next.length === visitedPaths.length) return
     visitedPaths = next
@@ -770,14 +753,8 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
   }
 }
 
-function registerHandlebarsPartials (viewsDir: string): void {
-  handlebars.registerPartial('nav', readFileSync(resolve(viewsDir, 'partials/nav.hbs'), 'utf8'))
-}
-
-function registerHandlebarsHelpers (): void {
-  handlebars.registerHelper('checked', (value: unknown) => value ? 'checked' : '')
-  handlebars.registerHelper('selected', (value: unknown) => value ? 'selected' : '')
-  handlebars.registerHelper('json', (value: unknown) => new handlebars.SafeString(JSON.stringify(value)))
+function sendHtml (reply: FastifyReply, html: string): void {
+  reply.type('text/html; charset=utf-8').send(html)
 }
 
 function getPluginPages (plugins: UserPluginState[]): BrowserSyncPluginPage[] {
@@ -845,7 +822,7 @@ function getUrlInfos (state: UiState): UrlInfo[] {
   ]
 }
 
-function getSyncOptions (options: ClientRuntimeOptions): Array<{ kind: 'ghost' | 'form'; key: string; label: string; description: string; active: boolean }> {
+function getSyncOptions (options: ClientRuntimeOptions): SyncOption[] {
   return [
     { kind: 'ghost', key: 'scroll', label: 'Scroll sync', description: 'Synchronise scroll position across browsers', active: options.ghostMode.scroll },
     { kind: 'ghost', key: 'clicks', label: 'Click sync', description: 'Mirror clicks across browsers', active: options.ghostMode.clicks },
@@ -873,9 +850,10 @@ function decorateHistory (paths: string[]): HistoryEntry[] {
     .reverse()
 }
 
-function normalizeHistoryPath (path: string, serverUrl: string): string {
+function normalizeHistoryPath (path: string, serverUrl: string, mode: UiMode): string {
   try {
     const parsed = new URL(path, serverUrl)
+    if (mode === 'snippet') return parsed.href
     return `${parsed.pathname}${parsed.search}${parsed.hash}`
   } catch {
     return ''
@@ -893,8 +871,15 @@ function normalizePagePath (path: string | undefined): string | null {
   return normalized.split('?')[0] || '/'
 }
 
-function makeBrowserLocationMessage (path: string, serverUrl: string): BrowserLocationMessage {
+function makeBrowserLocationMessage (path: string, serverUrl: string, mode: UiMode): BrowserLocationMessage {
   const parsed = new URL(path, serverUrl)
+  if (mode === 'snippet') {
+    return {
+      type: 'browser:location',
+      override: true,
+      url: parsed.href,
+    }
+  }
   return {
     type: 'browser:location',
     override: true,
