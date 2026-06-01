@@ -7,7 +7,7 @@ import type {
   RemoteDebugState,
   UserPluginState,
 } from '../types.ts'
-import type { HtmlResult } from 'fragtml/types.js'
+import type { FragtmlTemplate } from 'fastify-fragtml'
 
 export const MAIN_FRAGMENT = 'main'
 
@@ -21,8 +21,6 @@ export type PageTemplateName =
   | 'network-throttle'
   | 'help'
   | 'plugin-page'
-
-export type PageTemplate = (context: UiTemplateContext) => HtmlResult
 
 export interface NavLink {
   href: string
@@ -75,3 +73,5 @@ export interface UiTemplateContext {
   remoteDebug: RemoteDebugState
   networkThrottle: NetworkThrottleState
 }
+
+export type PageTemplate = FragtmlTemplate<UiTemplateContext, string, typeof MAIN_FRAGMENT>

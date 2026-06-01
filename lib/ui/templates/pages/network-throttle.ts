@@ -1,8 +1,7 @@
 import html from 'fragtml'
-import type { UiTemplateContext } from '../types.ts'
-import type { HtmlResult } from 'fragtml/types.js'
+import type { PageTemplate } from '../types.ts'
 
-export function networkThrottlePageTemplate (context: UiTemplateContext): HtmlResult {
+export const networkThrottlePageTemplate: PageTemplate = context => {
   return html`
     <div class="page">
       <h1 class="page__title">Network Throttle</h1>

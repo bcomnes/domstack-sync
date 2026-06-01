@@ -3,6 +3,8 @@ import type { JsonSchemaToTsProvider } from '@fastify/type-provider-json-schema-
 import type { FastifyReply } from 'fastify'
 import fastifyStatic from '@fastify/static'
 import fastifyFormbody from '@fastify/formbody'
+import fastifyFragtml from 'fastify-fragtml'
+import html, { frag, raw, render as renderHtml } from 'fragtml'
 import { WebSocketServer, WebSocket } from 'ws'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -29,14 +31,15 @@ import type {
 } from './types.ts'
 import {
   MAIN_FRAGMENT,
-  renderUiFragment,
-  renderUiPage,
+  getUiPageTemplate,
   type NavLink,
   type PageTemplateName,
   type SyncOption,
   type UiTemplateContext,
   type UrlInfo,
 } from './templates/index.ts'
+import { layoutTemplate } from './templates/layout.ts'
+import type { FragtmlLayout } from 'fastify-fragtml'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
@@ -83,6 +86,7 @@ interface PageDescriptor {
 }
 
 type FormBody = Record<string, string | string[] | undefined>
+type UiLayout = FragtmlLayout<UiTemplateContext, string, typeof MAIN_FRAGMENT>
 
 const PAGES: PageDescriptor[] = [
   { path: '/', title: 'Overview', template: 'overview', order: 1 },
@@ -309,7 +313,23 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
   const fastify = Fastify({ logger: false }).withTypeProvider<JsonSchemaToTsProvider>()
   const publicDir = resolve(__dirname, 'public')
   let userPlugins: UserPluginState[] = opts.getUserPlugins?.() ?? []
+  const layout: UiLayout = {
+    contentType: 'text/html; charset=utf-8',
+    render: (children, context, renderOptions) => {
+      return layoutTemplate({ context, children, fragmentId: renderOptions.fragmentId })
+    },
+  }
 
+  await fastify.register(fastifyFragtml, {
+    fragtml: {
+      default: html,
+      frag,
+      html,
+      raw,
+      render: renderHtml,
+    },
+    layout,
+  })
   await fastify.register(fastifyFormbody)
   await fastify.register(fastifyStatic, { root: publicDir, prefix: '/' })
 
@@ -578,19 +598,23 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
     }
   }
 
-  async function renderFullPage (path: string, reply: FastifyReply): Promise<void> {
+  async function renderFullPage (path: string, reply: FastifyReply): Promise<FastifyReply> {
     const descriptor = getPage(path)
     const context = buildPageContext(path)
-    sendHtml(reply, renderUiPage(descriptor.template, context))
+    const body = await reply.render(getUiPageTemplate(descriptor.template), context)
+    return reply.send(body)
   }
 
-  async function renderFragment (path: string, reply: FastifyReply): Promise<void> {
+  async function renderFragment (path: string, reply: FastifyReply): Promise<FastifyReply> {
     const descriptor = getPage(path)
-    sendHtml(reply, renderUiFragment(descriptor.template, buildPageContext(path), MAIN_FRAGMENT))
+    const body = await reply.render(getUiPageTemplate(descriptor.template), buildPageContext(path), {
+      fragmentId: MAIN_FRAGMENT,
+    })
+    return reply.send(body)
   }
 
-  async function renderActionTarget (body: { returnTo?: string } | FormBody, fallback: string, reply: FastifyReply): Promise<void> {
-    await renderFragment(normalizeReturnPath(formString(body.returnTo) || fallback), reply)
+  function renderActionTarget (body: { returnTo?: string } | FormBody, fallback: string, reply: FastifyReply): Promise<FastifyReply> {
+    return renderFragment(normalizeReturnPath(formString(body.returnTo) || fallback), reply)
   }
 
   function buildPageContext (path: string): UiTemplateContext {
@@ -751,10 +775,6 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
     for (const plugin of userPlugins) opts.configureUserPlugin?.(plugin)
     broadcastUpdate({ plugins: cloneUserPlugins(userPlugins) })
   }
-}
-
-function sendHtml (reply: FastifyReply, html: string): void {
-  reply.type('text/html; charset=utf-8').send(html)
 }
 
 function getPluginPages (plugins: UserPluginState[]): BrowserSyncPluginPage[] {

@@ -1,8 +1,7 @@
 import html, { raw } from 'fragtml'
-import type { UiTemplateContext } from '../types.ts'
-import type { HtmlResult } from 'fragtml/types.js'
+import type { PageTemplate } from '../types.ts'
 
-export function pluginPageTemplate (context: UiTemplateContext): HtmlResult {
+export const pluginPageTemplate: PageTemplate = context => {
   const plugin = context.pluginPage
   const title = plugin?.page?.title ?? context.title
 

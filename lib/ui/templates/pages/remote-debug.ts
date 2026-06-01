@@ -1,9 +1,8 @@
 import html from 'fragtml'
 import { toggleTemplate } from '../components/forms.ts'
-import type { UiTemplateContext } from '../types.ts'
-import type { HtmlResult } from 'fragtml/types.js'
+import type { PageTemplate } from '../types.ts'
 
-export function remoteDebugPageTemplate (context: UiTemplateContext): HtmlResult {
+export const remoteDebugPageTemplate: PageTemplate = context => {
   const { remoteDebug } = context
 
   return html`

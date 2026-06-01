@@ -1,9 +1,8 @@
 import html, { raw } from 'fragtml'
 import { toggleTemplate } from '../components/forms.ts'
-import type { UiTemplateContext } from '../types.ts'
-import type { HtmlResult } from 'fragtml/types.js'
+import type { PageTemplate } from '../types.ts'
 
-export function pluginsPageTemplate (context: UiTemplateContext): HtmlResult {
+export const pluginsPageTemplate: PageTemplate = context => {
   return html`
     <div class="page">
       <div class="card__header">

@@ -1,10 +1,9 @@
 import html from 'fragtml'
 import { connectionListTemplate } from '../components/connection-list.ts'
 import { syncAllFormTemplate } from '../components/forms.ts'
-import type { UiTemplateContext } from '../types.ts'
-import type { HtmlResult } from 'fragtml/types.js'
+import type { PageTemplate } from '../types.ts'
 
-export function overviewPageTemplate (context: UiTemplateContext): HtmlResult {
+export const overviewPageTemplate: PageTemplate = context => {
   return html`
     <div class="page">
       <h1 class="page__title">Overview</h1>

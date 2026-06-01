@@ -1,7 +1,7 @@
 import html from 'fragtml'
-import type { HtmlResult } from 'fragtml/types.js'
+import type { PageTemplate } from '../types.ts'
 
-export function helpPageTemplate (): HtmlResult {
+export const helpPageTemplate: PageTemplate = () => {
   return html`
     <div class="page">
       <h1 class="page__title">Help</h1>

@@ -1,9 +1,8 @@
 import html from 'fragtml'
 import { syncAllFormTemplate } from '../components/forms.ts'
-import type { UiTemplateContext } from '../types.ts'
-import type { HtmlResult } from 'fragtml/types.js'
+import type { PageTemplate } from '../types.ts'
 
-export function historyPageTemplate (context: UiTemplateContext): HtmlResult {
+export const historyPageTemplate: PageTemplate = context => {
   return html`
     <div class="page">
       <h1 class="page__title">History</h1>

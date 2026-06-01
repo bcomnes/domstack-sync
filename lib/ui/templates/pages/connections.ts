@@ -1,9 +1,8 @@
 import html from 'fragtml'
 import { connectionListTemplate } from '../components/connection-list.ts'
-import type { UiTemplateContext } from '../types.ts'
-import type { HtmlResult } from 'fragtml/types.js'
+import type { PageTemplate } from '../types.ts'
 
-export function connectionsPageTemplate (context: UiTemplateContext): HtmlResult {
+export const connectionsPageTemplate: PageTemplate = context => {
   return html`
     <div class="page">
       <h1 class="page__title">Connections</h1>
