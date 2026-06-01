@@ -15,6 +15,17 @@
     "domstack-sync": "./lib/cli.js",
     "dss": "./lib/cli.js"
   },
+  "files": [
+    "index.d.ts",
+    "index.d.ts.map",
+    "index.js",
+    "lib/**/*.d.ts",
+    "lib/**/*.d.ts.map",
+    "lib/**/*.js",
+    "lib/client/assets/**/*.css",
+    "lib/client/dist/**/*.js",
+    "lib/ui/public/**/*"
+  ],
   "engines": {
     "node": ">=20",
     "npm": ">=10"
@@ -62,6 +73,7 @@
   },
   "scripts": {
     "prepublishOnly": "releasearoni",
+    "prepack": "npm run build",
     "postpublish": "npm run clean",
     "test": "run-s test:*",
     "test:lint": "eslint .",
@@ -77,7 +89,7 @@
     "clean": "run-p clean:*",
     "clean:declarations-top": "rm -rf $(find . -maxdepth 1 -type f -name '*.d.ts*')",
     "clean:js-top": "rm -rf $(find . -maxdepth 1 -type f -name '*.js' ! -name '*.config.js')",
-    "clean:declarations-lib": "rm -rf $(find lib -type f -name '*.d.ts*' ! -name '*-types.d.ts')",
+    "clean:declarations-lib": "rm -rf $(find lib -type f -name '*.d.ts*' ! -path 'lib/ui/htmx-types.d.ts')",
     "clean:js-lib": "rm -rf $(find lib -type f -name '*.js' ! -path 'lib/client/dist/*' ! -path 'lib/ui/public/*')"
   },
   "funding": {

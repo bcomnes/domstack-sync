@@ -6,7 +6,7 @@
 [![neostandard javascript style](https://img.shields.io/badge/code_style-neostandard-7fffff?style=flat&labelColor=ff80ff)](https://github.com/neostandard/neostandard)
 [![Socket Badge](https://socket.dev/api/badge/npm/package/@domstack/sync)](https://socket.dev/npm/package/@domstack/sync)
 
-A modern, minimal live-reload dev server. A love letter to browser-sync, rewritten from scratch: ESM-only, Fastify, native WebSocket, Preact UI panel.
+A modern, minimal live-reload dev server. A love letter to browser-sync, rewritten from scratch: ESM-only, Fastify, native WebSocket, server-rendered HTMX UI panel.
 
 ## Install
 

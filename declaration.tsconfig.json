@@ -5,8 +5,7 @@
     "declaration": true,
     "declarationMap": true,
     "emitDeclarationOnly": false,
-    "noEmit": false,
-    "outDir": "./dist"
+    "noEmit": false
   },
   "exclude": [
     "**/*.js",
@@ -15,6 +14,7 @@
     "coverage",
     ".github",
     ".legacy",
+    "playwright.config.ts",
     "browser-tests",
     "lib/client",
     "lib/ui/app",
