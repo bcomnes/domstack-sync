@@ -8,7 +8,6 @@ import { Transform } from 'node:stream'
 import { readFileSync } from 'node:fs'
 import { basename, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createRequire } from 'node:module'
 import { createServer as createNetServer } from 'node:net'
 import type { AddressInfo } from 'node:net'
 import picomatch from 'picomatch'
@@ -24,6 +23,23 @@ import { createUiServer } from './ui/server.ts'
 import { getReloadDecision } from './reload-decision.ts'
 import { applyGhostModePatch, parseOptions } from './options.ts'
 import { BsPluginManager } from './plugins.ts'
+import {
+  clientJsRouteSchema,
+  legacyHttpProtocolRouteSchema,
+  notifyRouteSchema,
+  reloadRouteSchema,
+  remoteDebugAssetRouteSchema,
+} from './server-schemas.ts'
+import {
+  formatLegacyArg,
+  getLegacyHttpProtocolParams,
+  getReloadArgFromBody,
+  getReloadFiles,
+  isReloadStreamOptions,
+  type ReloadArg,
+  type StreamOptions,
+} from './reload-api.ts'
+import { normalizeStaticPrefix, renderDirectoryList } from './static-serving.ts'
 import type { BsOptions, BsOptionsInput } from './options.ts'
 import type { WatchEvent } from './watcher.ts'
 import type { ClientRuntimeOptions, ClientRuntimeOptionsPatch } from './protocol.ts'
@@ -33,7 +49,6 @@ import type { Duplex } from 'node:stream'
 import type { BrowserSyncPluginApi, PluginMiddleware, PluginMiddlewareOptions, PluginServeFileOptions } from './plugin-types.ts'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
-const require = createRequire(import.meta.url)
 
 export interface BsInstance {
   url: string
@@ -56,20 +71,9 @@ export interface BsInstance {
   removeMiddleware: (id: string) => void
 }
 
-export interface StreamOptions {
-  match?: string | string[]
-  once?: boolean
-}
-
-export interface ReloadStreamOptions extends StreamOptions {
-  stream: true
-}
-
 interface StreamChunk {
   path?: string
 }
-
-type ReloadArg = string | string[] | ReloadStreamOptions | undefined
 
 interface RuntimeMiddlewareEntry {
   id: string
@@ -80,95 +84,6 @@ interface RuntimeMiddlewareEntry {
 interface RuntimeMiddlewareOptions extends PluginMiddlewareOptions {
   exact?: boolean
 }
-
-const textResponseSchema = {
-  200: { type: 'string' },
-} as const
-
-const okResponseSchema = {
-  200: {
-    type: 'object',
-    required: ['ok'],
-    additionalProperties: false,
-    properties: {
-      ok: { type: 'boolean' },
-    },
-  },
-} as const
-
-const clientJsRouteSchema = {
-  response: textResponseSchema,
-} as const
-
-const remoteDebugAssetRouteSchema = {
-  response: textResponseSchema,
-} as const
-
-const reloadRouteSchema = {
-  body: {
-    anyOf: [
-      {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          files: {
-            anyOf: [
-              { type: 'string' },
-              { type: 'array', items: { type: 'string' } },
-            ],
-          },
-          args: {
-            anyOf: [
-              { type: 'string' },
-              { type: 'array', items: { type: 'string' } },
-            ],
-          },
-        },
-      },
-      { type: 'string' },
-      { type: 'array', items: { type: 'string' } },
-      { type: 'null' },
-    ],
-  },
-  response: okResponseSchema,
-} as const
-
-const legacyHttpProtocolRouteSchema = {
-  querystring: {
-    type: 'object',
-    additionalProperties: true,
-    properties: {
-      method: { type: 'string' },
-      args: {
-        anyOf: [
-          { type: 'string' },
-          { type: 'array', items: { type: 'string' } },
-        ],
-      },
-    },
-  },
-  response: {
-    200: { type: 'string' },
-    404: { type: 'string' },
-    500: { type: 'string' },
-  },
-} as const
-
-const notifyRouteSchema = {
-  body: {
-    anyOf: [
-      {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          message: { type: 'string' },
-        },
-      },
-      { type: 'null' },
-    ],
-  },
-  response: okResponseSchema,
-} as const
 
 export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): Promise<BsInstance> {
   const opts = parseOptions(rawOpts)
@@ -234,8 +149,8 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
   })
 
   const remoteDebugAssets = [
-    { path: '/browser-sync/pesticide.css', file: require.resolve('pesticide/css/pesticide.css') },
-    { path: '/browser-sync/pesticide-depth.css', file: require.resolve('pesticide/css/pesticide-depth.css') },
+    { path: '/browser-sync/pesticide.css', file: fileURLToPath(import.meta.resolve('pesticide/css/pesticide.css')) },
+    { path: '/browser-sync/pesticide-depth.css', file: fileURLToPath(import.meta.resolve('pesticide/css/pesticide-depth.css')) },
   ]
 
   for (const asset of remoteDebugAssets) {
@@ -339,6 +254,12 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
     sockets.broadcast({ type: 'options', data: runtimeOptions })
     return runtimeOptions
   }
+
+  let lastFileBroadcastAt = 0
+  let publicReloadDebounceTimer: ReturnType<typeof setTimeout> | null = null
+  let hasPendingPublicReload = false
+  let pendingPublicReloadFiles: string[] | undefined
+  const reloadDelayTimers = new Set<ReturnType<typeof setTimeout>>()
 
   // WebSocket support
   const sockets = new BsSockets({
@@ -483,12 +404,6 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
   if (watchFiles.length > 0) {
     logger.info('Watching files...')
   }
-
-  let lastFileBroadcastAt = 0
-  let publicReloadDebounceTimer: ReturnType<typeof setTimeout> | null = null
-  let hasPendingPublicReload = false
-  let pendingPublicReloadFiles: string[] | undefined
-  const reloadDelayTimers = new Set<ReturnType<typeof setTimeout>>()
 
   function broadcastFiles (files?: string[]): void {
     if (!opts.codeSync) return
@@ -818,68 +733,4 @@ function tryBindThrottlePort (port: number): Promise<number | null> {
 function getMiddlewarePathname (req: IncomingMessage): string {
   const originalUrl = (req as IncomingMessage & { originalUrl?: string }).originalUrl ?? req.url ?? '/'
   return new URL(originalUrl, 'http://localhost').pathname
-}
-
-function isReloadStreamOptions (arg: ReloadArg): arg is ReloadStreamOptions {
-  return Boolean(arg && typeof arg === 'object' && !Array.isArray(arg) && arg.stream === true)
-}
-
-function getReloadFiles (arg: ReloadArg): string[] | undefined {
-  if (Array.isArray(arg)) return arg
-  if (typeof arg === 'string' && arg !== 'undefined') return [arg]
-  return undefined
-}
-
-function getReloadArgFromBody (body: { files?: unknown; args?: unknown } | string | string[] | null): ReloadArg {
-  if (typeof body === 'string') return body
-  if (Array.isArray(body)) return body.every(item => typeof item === 'string') ? body : undefined
-  if (!body || typeof body !== 'object') return undefined
-
-  const value = body.files ?? body.args
-  if (typeof value === 'string') return value
-  if (Array.isArray(value) && value.every(item => typeof item === 'string')) return value
-  return undefined
-}
-
-function getLegacyHttpProtocolParams (url: string): { hasParams: boolean; method?: string; args?: ReloadArg } {
-  const parsed = new URL(url, 'http://localhost')
-  const args = parsed.searchParams.getAll('args')
-  const output: { hasParams: boolean; method?: string; args?: ReloadArg } = {
-    hasParams: Array.from(parsed.searchParams.keys()).length > 0,
-  }
-  const method = parsed.searchParams.get('method')
-  if (method !== null) output.method = method
-  if (args.length > 0) output.args = args.length === 1 ? args[0] : args
-  return output
-}
-
-function formatLegacyArg (arg: ReloadArg): string {
-  return JSON.stringify(arg) ?? 'undefined'
-}
-
-interface DirectoryListItem {
-  href: string
-  name: string
-}
-
-function normalizeStaticPrefix (route: string): string {
-  const prefixed = route.startsWith('/') ? route : `/${route}`
-  if (prefixed === '/') return '/'
-  return prefixed.endsWith('/') ? prefixed : `${prefixed}/`
-}
-
-function renderDirectoryList (dirs: DirectoryListItem[], files: DirectoryListItem[]): string {
-  const items = [...dirs, ...files]
-    .map(item => `<li><a href="${escapeHtml(item.href)}">${escapeHtml(item.name)}</a></li>`)
-    .join('\n')
-
-  return `<!doctype html><html><body><ul>${items}</ul></body></html>`
-}
-
-function escapeHtml (value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
 }

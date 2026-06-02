@@ -709,6 +709,20 @@ test('createServer: runtime middleware override keeps prefix route semantics', {
   assert.strictEqual(await res.text(), 'override prefix hit')
 })
 
+test('createServer: plugin can call reload during initialization', async (t) => {
+  const plugin: BrowserSyncPluginModule = {
+    'plugin:name': 'reload-init',
+    plugin (bs) {
+      bs.reload('init.css')
+    },
+  }
+
+  const bs = await createServer(makeOpts({ plugins: [plugin] }))
+  t.after(() => bs.exit())
+
+  assert.strictEqual(bs.getUserPlugin('reload-init')?.active, true)
+})
+
 test('createServer: .stream() returns a Transform', async (t) => {
   const { Transform } = await import('node:stream')
   const bs = await createServer(makeOpts())
@@ -1223,18 +1237,18 @@ test('createServer: plugin module strings resolve package UI metadata and query 
   assert.strictEqual(uiPlugin?.page?.path, '/package-plugin')
 })
 
-test('createServer: plugin module strings resolve absolute CommonJS modules', { timeout: 10000 }, async (t) => {
+test('createServer: plugin module strings resolve absolute ESM modules', { timeout: 10000 }, async (t) => {
   const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs')
   const { tmpdir } = await import('node:os')
   const { join } = await import('node:path')
 
-  const dir = mkdtempSync(join(tmpdir(), 'bs-plugin-cjs-'))
-  const pluginPath = join(dir, 'cjs-plugin.cjs')
+  const dir = mkdtempSync(join(tmpdir(), 'bs-plugin-esm-'))
+  const pluginPath = join(dir, 'esm-plugin.mjs')
   writeFileSync(pluginPath, [
-    'module.exports = {',
-    '  "plugin:name": "cjs-plugin",',
-    '  title: "CJS Plugin",',
-    '  plugin (bs, opts) { bs.events.emit("cjs-plugin:init", opts) }',
+    'export default {',
+    '  "plugin:name": "esm-plugin",',
+    '  title: "ESM Plugin",',
+    '  plugin (bs, opts) { bs.events.emit("esm-plugin:init", opts) }',
     '}',
   ].join('\n'))
 
@@ -1246,5 +1260,5 @@ test('createServer: plugin module strings resolve absolute CommonJS modules', { 
     rmSync(dir, { recursive: true, force: true })
   })
 
-  assert.deepStrictEqual(bs.getUserPlugin('cjs-plugin')?.opts, { mode: 'query' })
+  assert.deepStrictEqual(bs.getUserPlugin('esm-plugin')?.opts, { mode: 'query' })
 })

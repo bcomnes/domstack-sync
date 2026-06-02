@@ -156,16 +156,16 @@ test('cli: --version exits 0 and prints a version string', async () => {
   assert.match(stdout.trim(), /^\d+\.\d+\.\d+/)
 })
 
-test('cli: init creates domstack-sync.config.js', async () => {
+test('cli: init creates domstack-sync.config.mjs', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'sync-cli-test-'))
   try {
     const { code } = await run(['init'], dir)
     assert.strictEqual(code, 0)
-    const configPath = join(dir, 'domstack-sync.config.js')
-    assert.ok(existsSync(configPath), 'domstack-sync.config.js should be created')
+    const configPath = join(dir, 'domstack-sync.config.mjs')
+    assert.ok(existsSync(configPath), 'domstack-sync.config.mjs should be created')
     const config = readFileSync(configPath, 'utf8')
-    assert.ok(config.includes('module.exports'), config)
-    assert.ok(!config.includes('export default'), config)
+    assert.ok(config.includes('export default'), config)
+    assert.ok(!config.includes('module.exports'), config)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -191,6 +191,86 @@ test('cli: init config is loaded by startup', { timeout: 10000 }, async (t) => {
   const res = await fetch(url)
   assert.strictEqual(res.status, 200)
   assert.ok((await res.text()).includes('generated config'))
+})
+
+test('cli: init config is loaded in package type module projects', { timeout: 10000 }, async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'sync-cli-init-esm-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ type: 'module' }))
+  writeFileSync(join(dir, 'index.html'), '<!doctype html><title>esm generated config</title>')
+
+  const init = await run(['init'], dir)
+  assert.strictEqual(init.code, 0, init.stderr)
+
+  const child = spawn(process.execPath, [
+    cliPath,
+    '--port',
+    '0',
+    '--no-ui',
+  ], { cwd: dir, stdio: 'pipe' })
+  t.after(() => closeChild(child))
+
+  const url = await waitForServerUrl(child)
+  const res = await fetch(url)
+  assert.strictEqual(res.status, 200)
+  assert.ok((await res.text()).includes('esm generated config'))
+})
+
+test('cli: domstack-sync.config.mts is loaded with type stripping', { timeout: 10000 }, async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'sync-cli-config-mts-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  writeFileSync(join(dir, 'index.html'), '<!doctype html><title>mts config</title>')
+  writeFileSync(join(dir, 'domstack-sync.config.mts'), [
+    "const files: string[] = ['**/*.html']",
+    'export default {',
+    "  server: '.',",
+    '  files,',
+    '  port: 3000,',
+    '}',
+    '',
+  ].join('\n'))
+
+  const child = spawn(process.execPath, [
+    cliPath,
+    '--port',
+    '0',
+    '--no-ui',
+  ], { cwd: dir, stdio: 'pipe' })
+  t.after(() => closeChild(child))
+
+  const url = await waitForServerUrl(child)
+  const res = await fetch(url)
+  assert.strictEqual(res.status, 200)
+  assert.ok((await res.text()).includes('mts config'))
+})
+
+test('cli: domstack-sync.config.ts is loaded with type stripping in ESM projects', { timeout: 10000 }, async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'sync-cli-config-ts-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ type: 'module' }))
+  writeFileSync(join(dir, 'index.html'), '<!doctype html><title>ts config</title>')
+  writeFileSync(join(dir, 'domstack-sync.config.ts'), [
+    "const files: string[] = ['**/*.html']",
+    'export default {',
+    "  server: '.',",
+    '  files,',
+    '  port: 3000,',
+    '}',
+    '',
+  ].join('\n'))
+
+  const child = spawn(process.execPath, [
+    cliPath,
+    '--port',
+    '0',
+    '--no-ui',
+  ], { cwd: dir, stdio: 'pipe' })
+  t.after(() => closeChild(child))
+
+  const url = await waitForServerUrl(child)
+  const res = await fetch(url)
+  assert.strictEqual(res.status, 200)
+  assert.ok((await res.text()).includes('ts config'))
 })
 
 test('cli: reload forwards --files payload', async () => {
@@ -305,14 +385,14 @@ test('cli: start treats trailing --files values as watch globs', { timeout: 1000
   assert.ok(typeof file['path'] === 'string' && file['path'].endsWith('b.css'))
 })
 
-test('cli: invalid domstack-sync.config.js exits with an error', async () => {
+test('cli: invalid domstack-sync.config.mjs exits with an error', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'sync-cli-bad-config-'))
   try {
-    writeFileSync(join(dir, 'domstack-sync.config.js'), 'throw new Error("bad config")\n')
+    writeFileSync(join(dir, 'domstack-sync.config.mjs'), 'throw new Error("bad config")\n')
     const result = await runWithTimeout(['--no-ui', '--port', '0', '--log-level', 'silent'], dir)
     assert.strictEqual(result.timedOut, false, `CLI kept running instead of reporting config error.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`)
     assert.notStrictEqual(result.code, 0)
-    assert.match(result.stderr, /domstack-sync\.config\.js/)
+    assert.match(result.stderr, /domstack-sync\.config\.mjs/)
     assert.match(result.stderr, /bad config/)
   } finally {
     rmSync(dir, { recursive: true, force: true })

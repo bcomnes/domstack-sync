@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util'
-import { existsSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { printHelpText } from 'argsclopts'
@@ -9,6 +9,12 @@ import { parseOptions } from './options.ts'
 import type { BsOptionsInput } from './options.ts'
 
 const pkgPath = resolve(fileURLToPath(new URL('..', import.meta.url)), 'package.json')
+const configFiles = [
+  'domstack-sync.config.mjs',
+  'domstack-sync.config.mts',
+  'domstack-sync.config.js',
+  'domstack-sync.config.ts',
+] as const
 type CliLogLevel = NonNullable<BsOptionsInput['logLevel']>
 
 const options = {
@@ -126,9 +132,7 @@ if (values.help) {
 }
 
 if (values.version) {
-  const { createRequire } = await import('node:module')
-  const require = createRequire(import.meta.url)
-  const pkg = require('../package.json') as { version: string }
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version: string }
   process.stdout.write(`${pkg.version}\n`)
   process.exit(0)
 }
@@ -136,13 +140,13 @@ if (values.version) {
 if (command === 'init') {
   const config = `// @domstack/sync config
 // https://github.com/bcomnes/domstack-sync
-module.exports = {
+export default {
   server: '.',
   files: ['**/*.html', '**/*.css', '**/*.js'],
   port: 3000,
 }
 `
-  const dest = resolve(process.cwd(), 'domstack-sync.config.js')
+  const dest = resolve(process.cwd(), 'domstack-sync.config.mjs')
   writeFileSync(dest, config)
   process.stdout.write(`Created ${dest}\n`)
   process.exit(0)
@@ -172,8 +176,10 @@ if (command === 'reload') {
 
 // Load config from cwd if present.
 let fileConfig: BsOptionsInput = {}
-const configPath = resolve(process.cwd(), 'domstack-sync.config.js')
-if (existsSync(configPath)) {
+const configPath = [
+  ...configFiles,
+].map(file => resolve(process.cwd(), file)).find(existsSync)
+if (configPath) {
   try {
     const mod = await import(pathToFileURL(configPath).href) as { default?: unknown }
     if (mod.default && typeof mod.default === 'object') {

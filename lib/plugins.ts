@@ -42,7 +42,7 @@ interface ClientJsAsset {
   content: string
 }
 
-const nodeRequire = createRequire(import.meta.url)
+const moduleResolver = createRequire(import.meta.url)
 
 export class BsPluginManager {
   private readonly plugins: ResolvedPlugin[]
@@ -300,7 +300,7 @@ async function loadPluginModule (
 
   const { moduleName, queryOptions } = splitPluginSpec(moduleOrName)
   const modulePath = resolveModulePath(moduleName, cwd)
-  const loaded = await import(pathToFileURL(modulePath).href).catch(() => nodeRequire(modulePath) as unknown)
+  const loaded = await import(pathToFileURL(modulePath).href)
   return { module: unwrapModule(loaded), moduleName, modulePath, queryOptions }
 }
 
@@ -343,7 +343,7 @@ function splitPluginSpec (spec: string): { moduleName: string; queryOptions: Rec
 
 function resolveModulePath (moduleName: string, cwd: string): string {
   try {
-    return nodeRequire.resolve(moduleName, { paths: [cwd] })
+    return moduleResolver.resolve(moduleName, { paths: [cwd] })
   } catch {
     const maybe = isAbsolute(moduleName) ? moduleName : resolve(cwd, moduleName)
     if (existsSync(maybe)) return resolveExistingModulePath(maybe)
@@ -353,7 +353,7 @@ function resolveModulePath (moduleName: string, cwd: string): string {
 
 function resolveExistingModulePath (candidate: string): string {
   try {
-    return nodeRequire.resolve(candidate)
+    return moduleResolver.resolve(candidate)
   } catch {
     if (statSync(candidate).isFile()) return candidate
     const packageJson = join(candidate, 'package.json')
@@ -379,7 +379,7 @@ function resolveExistingModulePath (candidate: string): string {
         // Fall through to common index filenames.
       }
     }
-    for (const entry of ['index.mjs', 'index.js', 'index.cjs']) {
+    for (const entry of ['index.mjs', 'index.js']) {
       const fullPath = join(candidate, entry)
       if (existsSync(fullPath)) return fullPath
     }

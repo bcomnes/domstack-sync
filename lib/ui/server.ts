@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 import type { EventEmitter } from 'node:events'
 import type { IncomingMessage } from 'node:http'
 import type { Duplex } from 'node:stream'
-import type { BrowserSyncPluginPage, PluginUiEvent } from '../plugin-types.ts'
+import type { PluginUiEvent } from '../plugin-types.ts'
 import type { BsClientInfo } from '../sockets.ts'
 import type { BrowserLocationMessage, UiElementDescriptor } from '../protocol.ts'
 import type { ClientRuntimeOptions, ClientRuntimeOptionsPatch } from '../protocol.ts'
@@ -20,26 +20,62 @@ import type {
   NetworkThrottleState,
   NetworkThrottleTarget,
   OverlayGridState,
-  RemoteDebugClientFile,
   RemoteDebugState,
   UiState,
   UiServerMessage,
   UiClientMessage,
-  HistoryEntry,
   UserPluginState,
   UiMode,
 } from './types.ts'
 import {
   MAIN_FRAGMENT,
   getUiPageTemplate,
-  type NavLink,
-  type PageTemplateName,
-  type SyncOption,
   type UiTemplateContext,
-  type UrlInfo,
 } from './templates/index.ts'
 import { layoutTemplate } from './templates/layout.ts'
 import type { FragtmlLayout } from 'fastify-fragtml'
+import {
+  PAGES,
+  buildPageContext,
+  cloneUserPlugins,
+  decorateHistory,
+  getPage,
+  getPluginPages,
+  makeBrowserLocationMessage,
+  normalizeHistoryPath,
+  normalizeReturnPath,
+} from './page-model.ts'
+import {
+  cloneRemoteDebug,
+  defaultOverlayGrid,
+  fileToElement,
+  getOverlayGridCss,
+  remoteDebugClientFiles,
+} from './remote-debug.ts'
+import { cloneNetworkThrottle, throttleTargets } from './network-throttle.ts'
+import {
+  formBoolean,
+  formString,
+  parseNumber,
+  removeUndefined,
+} from './forms.ts'
+import type { FormBody } from './forms.ts'
+import {
+  clearActionSchema,
+  emptyBodySchema,
+  formActionResponseSchema,
+  idActionSchema,
+  latencyActionSchema,
+  networkThrottleCreateActionSchema,
+  networkThrottleDestroyActionSchema,
+  optionActionSchema,
+  overlayGridUpdateActionSchema,
+  pathActionSchema,
+  pluginSetActionSchema,
+  pluginSetManyActionSchema,
+  remoteDebugActiveActionSchema,
+  remoteDebugFileActionSchema,
+} from './schemas.ts'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
@@ -78,236 +114,7 @@ export interface UiInstance {
   exit: () => Promise<void>
 }
 
-interface PageDescriptor {
-  path: string
-  title: string
-  template: PageTemplateName
-  order: number
-}
-
-type FormBody = Record<string, string | string[] | undefined>
 type UiLayout = FragtmlLayout<UiTemplateContext, string, typeof MAIN_FRAGMENT>
-
-const PAGES: PageDescriptor[] = [
-  { path: '/', title: 'Overview', template: 'overview', order: 1 },
-  { path: '/sync-options', title: 'Sync Options', template: 'sync-options', order: 2 },
-  { path: '/history', title: 'History', template: 'history', order: 3 },
-  { path: '/connections', title: 'Connections', template: 'connections', order: 4 },
-  { path: '/remote-debug', title: 'Remote Debug', template: 'remote-debug', order: 5 },
-  { path: '/plugins', title: 'Plugins', template: 'plugins', order: 6 },
-  { path: '/network-throttle', title: 'Network Throttle', template: 'network-throttle', order: 7 },
-  { path: '/help', title: 'Help', template: 'help', order: 8 },
-]
-
-const remoteDebugClientFiles: RemoteDebugClientFile[] = [
-  {
-    type: 'css',
-    id: '__browser-sync-pesticide__',
-    active: false,
-    title: 'CSS Outlining',
-    name: 'pesticide',
-    src: '/browser-sync/pesticide.css',
-  },
-  {
-    type: 'css',
-    id: '__browser-sync-pesticidedepth__',
-    active: false,
-    title: 'CSS Depth Outlining',
-    name: 'pesticide-depth',
-    src: '/browser-sync/pesticide-depth.css',
-  },
-]
-
-const defaultOverlayGrid: OverlayGridState = {
-  active: false,
-  offsetY: '0',
-  offsetX: '0',
-  size: '16px',
-  selector: 'body',
-  color: 'rgba(0, 0, 0, .2)',
-  horizontal: true,
-  vertical: true,
-}
-
-const throttleTargets: NetworkThrottleTarget[] = [
-  { active: false, title: 'DSL (2Mbs, 5ms RTT)', id: 'dsl', speed: 200, latency: 5, urls: [], order: 1 },
-  { active: false, title: '4G (4Mbs, 20ms RTT)', id: '4g', speed: 400, latency: 10, urls: [], order: 2 },
-  { active: false, title: '3G (750kbs, 100ms RTT)', id: '3g', speed: 75, latency: 50, urls: [], order: 3 },
-  { active: false, title: 'Good 2G (450kbs, 150ms RTT)', id: 'good-2g', speed: 45, latency: 75, urls: [], order: 4 },
-  { active: false, title: 'Regular 2G (250kbs, 300ms RTT)', id: '2g', speed: 25, latency: 150, urls: [], order: 5 },
-  { active: false, title: 'GPRS (50kbs, 500ms RTT)', id: 'gprs', speed: 5, latency: 250, urls: [], order: 6 },
-]
-
-const emptyBodySchema = {
-  type: 'object',
-  additionalProperties: true,
-} as const
-
-const formActionResponseSchema = {
-  200: { type: 'string' },
-} as const
-
-const optionActionSchema = {
-  body: {
-    type: 'object',
-    required: ['kind', 'key'],
-    additionalProperties: false,
-    properties: {
-      kind: { type: 'string', enum: ['ghost', 'form'] },
-      key: { type: 'string' },
-      active: { type: 'string', enum: ['true'] },
-      returnTo: { type: 'string' },
-    },
-  },
-  response: formActionResponseSchema,
-} as const
-
-const pathActionSchema = {
-  body: {
-    type: 'object',
-    required: ['path'],
-    additionalProperties: false,
-    properties: {
-      path: { type: 'string' },
-      returnTo: { type: 'string' },
-    },
-  },
-  response: formActionResponseSchema,
-} as const
-
-const clearActionSchema = {
-  body: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      returnTo: { type: 'string' },
-    },
-  },
-  response: formActionResponseSchema,
-} as const
-
-const idActionSchema = {
-  body: {
-    type: 'object',
-    required: ['id'],
-    additionalProperties: false,
-    properties: {
-      id: { type: 'string' },
-      returnTo: { type: 'string' },
-    },
-  },
-  response: formActionResponseSchema,
-} as const
-
-const remoteDebugFileActionSchema = {
-  body: {
-    type: 'object',
-    required: ['name'],
-    additionalProperties: false,
-    properties: {
-      name: { type: 'string' },
-      active: { type: 'string', enum: ['true'] },
-      returnTo: { type: 'string' },
-    },
-  },
-  response: formActionResponseSchema,
-} as const
-
-const remoteDebugActiveActionSchema = {
-  body: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      active: { type: 'string', enum: ['true'] },
-      returnTo: { type: 'string' },
-    },
-  },
-  response: formActionResponseSchema,
-} as const
-
-const overlayGridUpdateActionSchema = {
-  body: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      size: { type: 'string' },
-      color: { type: 'string' },
-      selector: { type: 'string' },
-      offsetY: { type: 'string' },
-      offsetX: { type: 'string' },
-      vertical: { type: 'string', enum: ['true'] },
-      horizontal: { type: 'string', enum: ['true'] },
-      returnTo: { type: 'string' },
-    },
-  },
-  response: formActionResponseSchema,
-} as const
-
-const latencyActionSchema = {
-  body: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      active: { type: 'string', enum: ['true'] },
-      rate: { type: 'string' },
-      returnTo: { type: 'string' },
-    },
-  },
-  response: formActionResponseSchema,
-} as const
-
-const networkThrottleCreateActionSchema = {
-  body: {
-    type: 'object',
-    required: ['targetId'],
-    additionalProperties: false,
-    properties: {
-      targetId: { type: 'string' },
-      port: { type: 'string' },
-      returnTo: { type: 'string' },
-    },
-  },
-  response: formActionResponseSchema,
-} as const
-
-const networkThrottleDestroyActionSchema = {
-  body: {
-    type: 'object',
-    required: ['port'],
-    additionalProperties: false,
-    properties: {
-      port: { type: 'string' },
-      returnTo: { type: 'string' },
-    },
-  },
-  response: formActionResponseSchema,
-} as const
-
-const pluginSetActionSchema = {
-  body: {
-    type: 'object',
-    required: ['name'],
-    additionalProperties: false,
-    properties: {
-      name: { type: 'string' },
-      active: { type: 'string', enum: ['true'] },
-      returnTo: { type: 'string' },
-    },
-  },
-  response: formActionResponseSchema,
-} as const
-
-const pluginSetManyActionSchema = {
-  body: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      active: { type: 'string', enum: ['true'] },
-      returnTo: { type: 'string' },
-    },
-  },
-  response: formActionResponseSchema,
-} as const
 
 export async function createUiServer (opts: UiServerOptions): Promise<UiInstance> {
   const fastify = Fastify({ logger: false }).withTypeProvider<JsonSchemaToTsProvider>()
@@ -599,15 +406,15 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
   }
 
   async function renderFullPage (path: string, reply: FastifyReply): Promise<FastifyReply> {
-    const descriptor = getPage(path)
-    const context = buildPageContext(path)
+    const descriptor = getPage(path, userPlugins)
+    const context = buildPageContext(path, buildState())
     const body = await reply.render(getUiPageTemplate(descriptor.template), context)
     return reply.send(body)
   }
 
   async function renderFragment (path: string, reply: FastifyReply): Promise<FastifyReply> {
-    const descriptor = getPage(path)
-    const body = await reply.render(getUiPageTemplate(descriptor.template), buildPageContext(path), {
+    const descriptor = getPage(path, userPlugins)
+    const body = await reply.render(getUiPageTemplate(descriptor.template), buildPageContext(path, buildState()), {
       fragmentId: MAIN_FRAGMENT,
     })
     return reply.send(body)
@@ -615,50 +422,6 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
 
   function renderActionTarget (body: { returnTo?: string } | FormBody, fallback: string, reply: FastifyReply): Promise<FastifyReply> {
     return renderFragment(normalizeReturnPath(formString(body.returnTo) || fallback), reply)
-  }
-
-  function buildPageContext (path: string): UiTemplateContext {
-    const state = buildState()
-    const page = getPage(path)
-    const pluginPage = state.plugins.find(plugin => normalizePagePath(plugin.page?.path) === path)
-    return {
-      ...state,
-      title: page.title,
-      path,
-      navLinks: getNavLinks(path, state.plugins),
-      urls: getUrlInfos(state),
-      connectionsDisplay: state.connections.map(client => ({
-        ...client,
-        browserLabel: `${client.browser.name}${client.browser.version ? ` ${client.browser.version}` : ''}`,
-        connectedAgo: timeAgo(client.connectedAt),
-      })),
-      historyDisplay: state.history.map(entry => ({
-        ...entry,
-        url: new URL(entry.path, state.serverUrl).href,
-      })),
-      syncOptions: getSyncOptions(state.options),
-      throttleTargets: [...state.networkThrottle.targets].sort((a, b) => a.order - b.order),
-      throttleServers: Object.values(state.networkThrottle.servers).sort((a, b) => a.port - b.port),
-      pluginPage,
-      remoteDebug: state.remoteDebug,
-      networkThrottle: state.networkThrottle,
-    }
-  }
-
-  function getPage (path: string): PageDescriptor {
-    const normalized = normalizePagePath(path) ?? '/'
-    const builtIn = PAGES.find(page => page.path === normalized)
-    if (builtIn) return builtIn
-    const plugin = userPlugins.find(item => normalizePagePath(item.page?.path) === normalized)
-    if (plugin?.page) {
-      return {
-        path: normalized,
-        title: plugin.page.title,
-        template: 'plugin-page',
-        order: plugin.page.order ?? Number.MAX_SAFE_INTEGER,
-      }
-    }
-    return PAGES[0]!
   }
 
   function setOptionFromForm (kind: 'ghost' | 'form', key: string, active: boolean): void {
@@ -775,243 +538,4 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
     for (const plugin of userPlugins) opts.configureUserPlugin?.(plugin)
     broadcastUpdate({ plugins: cloneUserPlugins(userPlugins) })
   }
-}
-
-function getPluginPages (plugins: UserPluginState[]): BrowserSyncPluginPage[] {
-  return plugins
-    .map(plugin => plugin.page)
-    .filter((page): page is BrowserSyncPluginPage => Boolean(page?.path && page.title))
-    .map(page => ({
-      ...page,
-      path: page.path.startsWith('/') ? page.path : `/${page.path}`,
-    }))
-    .sort((a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER) || a.title.localeCompare(b.title))
-}
-
-function getNavLinks (path: string, plugins: UserPluginState[]): NavLink[] {
-  const builtIn = PAGES.map(page => ({
-    href: page.path,
-    label: page.title,
-    active: page.path === path,
-    order: page.order,
-  }))
-  const pluginLinks = getPluginPages(plugins)
-    .filter(page => !PAGES.some(builtInPage => builtInPage.path === page.path))
-    .map(page => ({
-      href: page.path,
-      label: page.title,
-      active: page.path === path,
-      order: page.order ?? Number.MAX_SAFE_INTEGER,
-    }))
-  return [...builtIn, ...pluginLinks].sort((a, b) => a.order - b.order || a.label.localeCompare(b.label))
-}
-
-function getUrlInfos (state: UiState): UrlInfo[] {
-  const externalUrl = `http://${state.localIp}:${state.port}`
-  return [
-    {
-      title: 'Local',
-      tagline: 'URL for the machine running this server',
-      url: state.serverUrl,
-      sync: state.mode !== 'snippet',
-      path: getUrlPath(state.serverUrl, '/'),
-    },
-    {
-      title: 'External',
-      tagline: 'Other devices on the same network',
-      url: externalUrl,
-      sync: state.mode !== 'snippet',
-      path: getUrlPath(externalUrl, '/'),
-    },
-    ...(state.tunnelUrl
-      ? [{
-          title: 'Tunnel',
-          tagline: 'Public URL for remote devices',
-          url: state.tunnelUrl,
-          sync: state.mode !== 'snippet',
-          path: getUrlPath(state.tunnelUrl, '/'),
-        }]
-      : []),
-    {
-      title: 'UI',
-      tagline: 'Control panel for this domstack-sync instance',
-      url: state.uiUrl,
-      sync: false,
-      path: getUrlPath(state.uiUrl, '/'),
-    },
-  ]
-}
-
-function getSyncOptions (options: ClientRuntimeOptions): SyncOption[] {
-  return [
-    { kind: 'ghost', key: 'scroll', label: 'Scroll sync', description: 'Synchronise scroll position across browsers', active: options.ghostMode.scroll },
-    { kind: 'ghost', key: 'clicks', label: 'Click sync', description: 'Mirror clicks across browsers', active: options.ghostMode.clicks },
-    { kind: 'ghost', key: 'location', label: 'Location sync', description: 'Send connected browsers to the same URL', active: options.ghostMode.location },
-    { kind: 'form', key: 'inputs', label: 'Text input sync', description: 'Synchronise input and textarea key changes', active: options.ghostMode.forms.inputs },
-    { kind: 'form', key: 'toggles', label: 'Toggle sync', description: 'Synchronise checkbox, radio, and select changes', active: options.ghostMode.forms.toggles },
-    { kind: 'form', key: 'submit', label: 'Submit sync', description: 'Synchronise form submit and reset actions', active: options.ghostMode.forms.submit },
-  ]
-}
-
-function cloneUserPlugins (plugins: UserPluginState[]): UserPluginState[] {
-  return plugins.map(plugin => {
-    const clone: UserPluginState = { ...plugin }
-    if (plugin.opts) clone.opts = { ...plugin.opts }
-    if (plugin.page) clone.page = { ...plugin.page }
-    if (plugin.templates) clone.templates = { ...plugin.templates }
-    if (plugin.clientJs) clone.clientJs = { ...plugin.clientJs }
-    return clone
-  })
-}
-
-function decorateHistory (paths: string[]): HistoryEntry[] {
-  return paths
-    .map((path, index) => ({ path, key: index + 1 }))
-    .reverse()
-}
-
-function normalizeHistoryPath (path: string, serverUrl: string, mode: UiMode): string {
-  try {
-    const parsed = new URL(path, serverUrl)
-    if (mode === 'snippet') return parsed.href
-    return `${parsed.pathname}${parsed.search}${parsed.hash}`
-  } catch {
-    return ''
-  }
-}
-
-function normalizeReturnPath (path: string): string {
-  const normalized = normalizePagePath(path)
-  return normalized ?? '/'
-}
-
-function normalizePagePath (path: string | undefined): string | null {
-  if (!path) return null
-  const normalized = path.startsWith('/') ? path : `/${path}`
-  return normalized.split('?')[0] || '/'
-}
-
-function makeBrowserLocationMessage (path: string, serverUrl: string, mode: UiMode): BrowserLocationMessage {
-  const parsed = new URL(path, serverUrl)
-  if (mode === 'snippet') {
-    return {
-      type: 'browser:location',
-      override: true,
-      url: parsed.href,
-    }
-  }
-  return {
-    type: 'browser:location',
-    override: true,
-    path: `${parsed.pathname}${parsed.search}${parsed.hash}`,
-    url: parsed.href,
-  }
-}
-
-function fileToElement (file: RemoteDebugClientFile): UiElementDescriptor {
-  const element: UiElementDescriptor = {
-    id: file.id,
-    type: file.type,
-  }
-  if (file.src) element.src = file.src
-  return element
-}
-
-function cloneRemoteDebug (state: RemoteDebugState): RemoteDebugState {
-  return {
-    clientFiles: state.clientFiles.map(file => ({ ...file })),
-    overlayGrid: { ...state.overlayGrid },
-    noCache: { ...state.noCache },
-    latency: { ...state.latency },
-  }
-}
-
-function cloneNetworkThrottle (state: NetworkThrottleState): NetworkThrottleState {
-  return {
-    targets: state.targets.map(target => ({ ...target, urls: [...target.urls] })),
-    servers: Object.fromEntries(Object.entries(state.servers).map(([port, server]) => [
-      port,
-      {
-        port: server.port,
-        urls: [...server.urls],
-        speed: { ...server.speed, urls: [...server.speed.urls] },
-      },
-    ])),
-  }
-}
-
-function getOverlayGridCss (opts: OverlayGridState): string {
-  const selectorPosition = `${opts.selector} {position:relative;}`
-  const horizontal = opts.horizontal
-    ? `${opts.selector}:after {
-  position: absolute;
-  width: auto;
-  height: auto;
-  z-index: 9999;
-  content: '';
-  display: block;
-  pointer-events: none;
-  top: ${opts.offsetY};
-  right: 0;
-  bottom: 0;
-  left: ${opts.offsetX};
-  background-color: transparent;
-  background-image: linear-gradient(${opts.color} 1px, transparent 1px);
-  background-size: 100% ${opts.size};
-}`
-    : ''
-  const vertical = opts.vertical
-    ? `${opts.selector}:before {
-  position: absolute;
-  width: auto;
-  height: auto;
-  z-index: 9999;
-  content: '';
-  display: block;
-  pointer-events: none;
-  top: ${opts.offsetY};
-  right: 0;
-  bottom: 0;
-  left: ${opts.offsetX};
-  background-color: transparent;
-  background-image: linear-gradient(90deg, ${opts.color} 1px, transparent 1px);
-  background-size: ${opts.size} 100%;
-}`
-    : ''
-  return [selectorPosition, horizontal, vertical].filter(Boolean).join('\n')
-}
-
-function formBoolean (body: { active?: string } | FormBody, key = 'active'): boolean {
-  const value = (body as FormBody)[key]
-  return Array.isArray(value) ? value.includes('true') : value === 'true'
-}
-
-function formString (value: string | string[] | undefined): string {
-  return Array.isArray(value) ? value[0] ?? '' : value ?? ''
-}
-
-function parseNumber (value: string | undefined, fallback: number): number {
-  if (value === undefined) return fallback
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : fallback
-}
-
-function removeUndefined<T extends Record<string, unknown>> (input: T): Partial<T> {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)) as Partial<T>
-}
-
-function getUrlPath (url: string, fallback: string): string {
-  try {
-    const parsed = new URL(url)
-    return `${parsed.pathname}${parsed.search}${parsed.hash}`
-  } catch {
-    return fallback
-  }
-}
-
-function timeAgo (ts: number): string {
-  const secs = Math.floor((Date.now() - ts) / 1000)
-  if (secs < 60) return `${secs}s ago`
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`
-  return `${Math.floor(secs / 3600)}h ago`
 }

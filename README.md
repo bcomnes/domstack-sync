@@ -20,6 +20,9 @@ npm install @domstack/sync
 # Serve current directory, watch CSS and HTML
 domstack-sync --server . --files '**/*.css' '**/*.html'
 
+# Serve current directory and watch the served root
+domstack-sync --server . --watch
+
 # Watch files without serving (snippet-injection mode)
 domstack-sync --files '**/*.css'
 
@@ -29,7 +32,7 @@ dss --server . --files '**/*'
 # Disable the UI panel
 domstack-sync --server . --no-ui
 
-# Write a starter config file
+# Write a starter ESM config file
 domstack-sync init
 
 # Trigger a reload from another terminal
@@ -42,15 +45,19 @@ domstack-sync reload --port 3000
 |---|---|---|
 | `--server`, `-s` | — | Directory to serve |
 | `--files`, `-f` | — | Glob patterns to watch (repeatable) |
+| `--watch`, `-w` | — | Watch server roots in addition to `--files` |
+| `--ignore` | — | Ignore patterns for file watchers (repeatable) |
 | `--port` | `3000` | Port to listen on |
 | `--no-ui` | — | Disable the UI panel |
 | `--no-notify` | — | Disable the notification overlay |
-| `--no-ghost-mode` | — | Disable scroll/click/form sync |
+| `--no-ghost-mode` | — | Disable scroll/click/location/form sync |
 | `--cors` | — | Enable CORS headers |
 | `--log-level` | `info` | `silent` \| `debug` \| `info` \| `warn` \| `error` |
 | `--log-connections` | — | Log browser connection events at info level |
 | `--help`, `-h` | — | Show help text |
 | `--version`, `-v` | — | Show version |
+
+`domstack-sync init` writes `domstack-sync.config.mjs` using `export default`. On startup, the CLI loads the first config file it finds in this order: `domstack-sync.config.mjs`, `.mts`, `.js`, then `.ts`. TypeScript config files rely on Node's built-in type stripping.
 
 ## API
 
@@ -96,18 +103,33 @@ await sync.exit()
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `port` | `number` | `3000` | Port to listen on (falls back to OS-assigned if taken) |
-| `server` | `string \| false` | `false` | Directory to serve statically |
-| `files` | `string[]` | `[]` | Glob patterns to watch for changes |
-| `ghostMode` | `{ scroll, clicks, forms }` | all `true` | Sync interactions across connected browsers |
+| `server` | `string \| boolean \| string[] \| object` | `false` | Directory or directories to serve statically |
+| `files` | `string \| string[] \| object[]` | `[]` | Glob patterns or chokidar watch objects to watch for changes |
+| `ghostMode` | `boolean \| { scroll, clicks, location, forms }` | all `true` | Sync interactions across connected browsers |
 | `logLevel` | `'silent' \| 'debug' \| 'info' \| 'warn' \| 'error'` | `'info'` | Log verbosity |
 | `logConnections` | `boolean` | `false` | Log browser connection events at info level |
 | `ui` | `boolean \| { port: number }` | `true` | UI panel — `false` disables, `{ port }` pins the port |
 | `notify` | `boolean` | `true` | Show notification overlay in connected browsers |
 | `cors` | `boolean` | `false` | Add CORS headers to all responses |
-| `injectChanges` | `boolean` | `true` | CSS-inject `.css` changes instead of full reload |
+| `injectChanges` | `boolean` | `true` | Inject matching file changes instead of full reload |
+| `injectFileTypes` | `string[]` | `['css', 'png', 'jpg', 'jpeg', 'svg', 'gif', 'webp', 'map']` | Extensions eligible for file injection |
+| `tagNames` | `Record<string, string>` | built-in asset tag map | Element tag names used for non-CSS file injection |
+| `codeSync` | `boolean` | `true` | Broadcast reload and file-injection messages |
 | `reloadDebounce` | `number` | `500` | Milliseconds to debounce file-change reloads |
 | `reloadDelay` | `number` | `0` | Milliseconds to delay reload after a change |
+| `reloadThrottle` | `number` | `0` | Minimum milliseconds between reload broadcasts |
+| `scrollThrottle` | `number` | `0` | Minimum milliseconds between scroll sync messages |
+| `scrollElements` | `string[]` | `[]` | CSS selectors eligible for element scroll sync |
+| `scrollElementMapping` | `string[]` | `[]` | Selector mapping for scroll sync between different layouts |
+| `scrollProportionally` | `boolean` | `true` | Sync scroll position proportionally instead of raw pixels |
+| `watch` | `boolean` | `false` | Add server roots and routes to watched files |
+| `ignore` | `string \| string[]` | — | Ignore patterns merged into watcher options |
 | `watchOptions` | `object` | `{}` | Options passed through to chokidar |
+| `watchEvents` | `string[]` | `['change']` | Chokidar event names that trigger reloads |
+| `snippet` | `boolean` | `true` | Inject the browser client snippet into HTML responses |
+| `snippetOptions` | `object` | `{}` | Whitelist, blacklist, ignore paths, or custom injection rule |
+| `rewriteRules` | `object[]` | `[]` | HTML rewrite rules applied before snippet injection |
+| `plugins` | `array` | `[]` | BrowserSync-compatible plugin entries |
 | `cwd` | `string` | `process.cwd()` | Working directory for resolving `server` and `files` |
 
 ## TypeScript
@@ -121,9 +143,9 @@ import type { ServerToClientMessage, ClientToServerMessage } from '@domstack/syn
 
 ## How it works
 
-- **Script injection** — an IIFE `<script>` tag is injected before `</body>` (or appended if there is no `</body>`) in every HTML response. The injected script connects to the WebSocket server.
-- **CSS injection** — when a watched `.css` file changes and `injectChanges: true`, the matching `<link rel="stylesheet">` has its `href` cache-busted in place without a full page reload. Falls back to a full reload if no matching stylesheet is found.
-- **Ghost mode** — scroll position, clicks, and form input changes in one browser are relayed to all other connected browsers via the WebSocket server. Disable with `ghostMode: false` or `--no-ghost-mode`.
+- **Script injection** — an IIFE `<script>` tag is injected immediately after the opening `<body>` tag (or appended if there is no `<body>`) in every HTML response. The injected script connects to the WebSocket server.
+- **File injection** — when a watched injectable file changes and `injectChanges: true`, matching DOM assets are cache-busted in place without a full page reload. CSS stylesheets, imported stylesheets, images, inline image URLs, and configured asset tags are supported. Falls back to a full reload if no matching asset is found.
+- **Ghost mode** — scroll position, clicks, location changes, and form input changes in one browser are relayed to all other connected browsers via the WebSocket server. Disable with `ghostMode: false` or `--no-ghost-mode`.
 - **UI panel** — a separate Fastify server on an auto-detected port shows connected browsers, file-change history, and server URLs. Disable with `ui: false` or `--no-ui`.
 - **Port selection** — the requested port is tried first. If it is already in use, the OS assigns a free ephemeral port automatically.
 
