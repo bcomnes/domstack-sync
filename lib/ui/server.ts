@@ -834,7 +834,7 @@ function getUrlInfos (state: UiState): UrlInfo[] {
       : []),
     {
       title: 'UI',
-      tagline: 'Control panel for this BrowserSync instance',
+      tagline: 'Control panel for this domstack-sync instance',
       url: state.uiUrl,
       sync: false,
       path: getUrlPath(state.uiUrl, '/'),

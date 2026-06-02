@@ -9,6 +9,7 @@ import { parseOptions } from './options.ts'
 import type { BsOptionsInput } from './options.ts'
 
 const pkgPath = resolve(fileURLToPath(new URL('..', import.meta.url)), 'package.json')
+type CliLogLevel = NonNullable<BsOptionsInput['logLevel']>
 
 const options = {
   server: {
@@ -54,7 +55,11 @@ const options = {
   },
   'log-level': {
     type: 'string',
-    help: 'Log level: silent|info|debug',
+    help: 'Log level: silent|debug|info|warn|error',
+  },
+  'log-connections': {
+    type: 'boolean',
+    help: 'Log browser connection events at info level',
   },
   help: {
     type: 'boolean',
@@ -130,14 +135,14 @@ if (values.version) {
 
 if (command === 'init') {
   const config = `// @domstack/sync config
-// https://github.com/bcomnes/browser-sync
+// https://github.com/bcomnes/domstack-sync
 module.exports = {
   server: '.',
   files: ['**/*.html', '**/*.css', '**/*.js'],
   port: 3000,
 }
 `
-  const dest = resolve(process.cwd(), 'bs-config.js')
+  const dest = resolve(process.cwd(), 'domstack-sync.config.js')
   writeFileSync(dest, config)
   process.stdout.write(`Created ${dest}\n`)
   process.exit(0)
@@ -165,9 +170,9 @@ if (command === 'reload') {
   process.exit(0)
 }
 
-// Load bs-config.js from cwd if present
+// Load config from cwd if present.
 let fileConfig: BsOptionsInput = {}
-const configPath = resolve(process.cwd(), 'bs-config.js')
+const configPath = resolve(process.cwd(), 'domstack-sync.config.js')
 if (existsSync(configPath)) {
   try {
     const mod = await import(pathToFileURL(configPath).href) as { default?: unknown }
@@ -192,7 +197,8 @@ const opts = parseOptions({
   ...(values['no-ui'] ? { ui: false } : {}),
   ...(values['no-notify'] ? { notify: false } : {}),
   ...(values.cors ? { cors: values.cors } : {}),
-  ...(values['log-level'] !== undefined ? { logLevel: values['log-level'] as 'silent' | 'info' | 'debug' } : {}),
+  ...(values['log-level'] !== undefined ? { logLevel: values['log-level'] as CliLogLevel } : {}),
+  ...(values['log-connections'] ? { logConnections: true } : {}),
   ...(values['no-ghost-mode'] ? { ghostMode: { scroll: false, clicks: false, location: false, forms: false } } : {}),
 })
 

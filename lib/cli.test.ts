@@ -156,13 +156,13 @@ test('cli: --version exits 0 and prints a version string', async () => {
   assert.match(stdout.trim(), /^\d+\.\d+\.\d+/)
 })
 
-test('cli: init creates bs-config.js', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'bs-cli-test-'))
+test('cli: init creates domstack-sync.config.js', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sync-cli-test-'))
   try {
     const { code } = await run(['init'], dir)
     assert.strictEqual(code, 0)
-    const configPath = join(dir, 'bs-config.js')
-    assert.ok(existsSync(configPath), 'bs-config.js should be created')
+    const configPath = join(dir, 'domstack-sync.config.js')
+    assert.ok(existsSync(configPath), 'domstack-sync.config.js should be created')
     const config = readFileSync(configPath, 'utf8')
     assert.ok(config.includes('module.exports'), config)
     assert.ok(!config.includes('export default'), config)
@@ -172,7 +172,7 @@ test('cli: init creates bs-config.js', async () => {
 })
 
 test('cli: init config is loaded by startup', { timeout: 10000 }, async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'bs-cli-init-start-'))
+  const dir = mkdtempSync(join(tmpdir(), 'sync-cli-init-start-'))
   t.after(() => rmSync(dir, { recursive: true, force: true }))
   writeFileSync(join(dir, 'index.html'), '<!doctype html><title>generated config</title>')
 
@@ -305,14 +305,14 @@ test('cli: start treats trailing --files values as watch globs', { timeout: 1000
   assert.ok(typeof file['path'] === 'string' && file['path'].endsWith('b.css'))
 })
 
-test('cli: invalid bs-config.js exits with an error', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'bs-cli-bad-config-'))
+test('cli: invalid domstack-sync.config.js exits with an error', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sync-cli-bad-config-'))
   try {
-    writeFileSync(join(dir, 'bs-config.js'), 'throw new Error("bad config")\n')
+    writeFileSync(join(dir, 'domstack-sync.config.js'), 'throw new Error("bad config")\n')
     const result = await runWithTimeout(['--no-ui', '--port', '0', '--log-level', 'silent'], dir)
     assert.strictEqual(result.timedOut, false, `CLI kept running instead of reporting config error.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`)
     assert.notStrictEqual(result.code, 0)
-    assert.match(result.stderr, /bs-config\.js/)
+    assert.match(result.stderr, /domstack-sync\.config\.js/)
     assert.match(result.stderr, /bad config/)
   } finally {
     rmSync(dir, { recursive: true, force: true })

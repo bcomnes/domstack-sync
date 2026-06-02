@@ -129,7 +129,8 @@ export const bsOptionsSchema = {
       ],
     },
     ghostMode: { oneOf: [{ type: 'boolean' }, ghostModeSchema] },
-    logLevel: { type: 'string', enum: ['silent', 'info', 'debug'] as const },
+    logLevel: { type: 'string', enum: ['silent', 'debug', 'info', 'warn', 'error'] as const },
+    logConnections: { type: 'boolean' },
     ui: {
       oneOf: [
         { type: 'boolean' },
@@ -189,7 +190,8 @@ export interface BsOptions {
   files: FileWatchEntry[]
   server: ServerOptions | false
   ghostMode: GhostModeOptions
-  logLevel: 'silent' | 'info' | 'debug'
+  logLevel: 'silent' | 'debug' | 'info' | 'warn' | 'error'
+  logConnections: boolean
   ui: boolean | { port: number }
   notify: boolean
   cors: boolean
@@ -226,6 +228,7 @@ export function parseOptions (raw: BsOptionsInput = {}): BsOptions {
     server,
     ghostMode: ghost,
     logLevel: raw.logLevel ?? 'info',
+    logConnections: raw.logConnections ?? false,
     ui: raw.ui ?? true,
     notify: raw.notify ?? true,
     cors: raw.cors ?? false,

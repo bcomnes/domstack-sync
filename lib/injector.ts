@@ -1,5 +1,14 @@
 import { Readable } from 'node:stream'
-import type { FastifyInstance } from 'fastify'
+import type {
+  FastifyBaseLogger,
+  FastifyInstance,
+  FastifyTypeProvider,
+  FastifyTypeProviderDefault,
+  RawReplyDefaultExpression,
+  RawRequestDefaultExpression,
+  RawServerBase,
+  RawServerDefault,
+} from 'fastify'
 
 export interface InjectorRule {
   match: RegExp
@@ -27,7 +36,21 @@ async function readStream (stream: Readable): Promise<string> {
   return Buffer.concat(chunks).toString('utf-8')
 }
 
-export function registerInjector (fastify: FastifyInstance, snippet: string, options: InjectorOptions = {}): void {
+export function registerInjector<
+  RawServer extends RawServerBase = RawServerDefault,
+  Logger extends FastifyBaseLogger = FastifyBaseLogger,
+  TypeProvider extends FastifyTypeProvider = FastifyTypeProviderDefault
+> (
+  fastify: FastifyInstance<
+    RawServer,
+    RawRequestDefaultExpression<RawServer>,
+    RawReplyDefaultExpression<RawServer>,
+    Logger,
+    TypeProvider
+  >,
+  snippet: string,
+  options: InjectorOptions = {}
+): void {
   const rule = options.rule ?? defaultRule()
 
   fastify.addHook('onSend', async (request, reply, payload) => {

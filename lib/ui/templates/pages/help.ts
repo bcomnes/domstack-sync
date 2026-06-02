@@ -9,33 +9,30 @@ export const helpPageTemplate: PageTemplate = () => {
         <h2 class="card__title">Help / About</h2>
         <div class="help-section">
           <p class="lede">
-            Browsersync is an open-source project created by
-            <a href="https://twitter.com/shaneOsbourne" target="_blank">Shane Osbourne</a>.
+            domstack-sync is a dependency-minimized live-reload server for static sites and local development workflows.
           </p>
-          <p class="hint">The modern rewrite keeps these UI workflows aligned with the BrowserSync defaults while replacing the legacy dependency stack.</p>
+          <p class="hint">Use this panel to inspect connected browsers, file changes, sync options, and debugging tools for the current server.</p>
         </div>
       </div>
       <div class="card">
         <h2 class="card__title">Common questions</h2>
         <dl class="definition-list">
           <dt>Why is it not connecting?</dt>
-          <dd>Most connection issues happen when the page does not have a <code>body</code> tag. BrowserSync injects its client script near the closing body tag.</dd>
+          <dd>Most connection issues happen when the page does not have a <code>body</code> tag. domstack-sync injects its client script near the closing body tag.</dd>
           <dt>Which mode should I use?</dt>
           <dd>
             <ul>
               <li>Use server mode for simple HTML, CSS, and JavaScript files.</li>
-              <li>Legacy BrowserSync uses proxy mode when an existing app server owns the response path; this rewrite intentionally omits proxy and HTTPS handling for now.</li>
-              <li>Use snippet mode when you want to paste the client script into a page manually.</li>
+              <li>Use snippet mode when another local server owns the response path and you want to paste the client script into a page manually.</li>
             </ul>
           </dd>
           <dt>Where can I report an issue?</dt>
-          <dd>Use the project issue tracker for this rewrite, and use the BrowserSync docs when checking expected legacy behavior.</dd>
+          <dd>Use the project issue tracker for bugs, feature requests, and documentation gaps.</dd>
         </dl>
         <p class="hint">
-          BrowserSync reference:
-          <a href="https://www.browsersync.io/docs/" target="_blank">docs</a>,
-          <a href="https://github.com/BrowserSync/browser-sync/issues" target="_blank">issues</a>,
-          <a href="https://stackoverflow.com/questions/tagged/browser-sync" target="_blank">Stack Overflow</a>.
+          Project reference:
+          <a href="https://github.com/bcomnes/domstack-sync" target="_blank">repository</a>,
+          <a href="https://github.com/bcomnes/domstack-sync/issues" target="_blank">issues</a>.
         </p>
       </div>
       <div class="card">
@@ -65,15 +62,15 @@ export const helpPageTemplate: PageTemplate = () => {
         <h2 class="card__title">Programmatic API</h2>
         <pre class="code-block">import { createServer } from '@domstack/sync'
 
-const bs = await createServer({
+const sync = await createServer({
   server: './public',
   files: ['**/*.css', '**/*.html'],
 })
 
-bs.reload()           // trigger full reload
-bs.reload(['a.css'])  // CSS inject
-bs.notify('Updated')  // overlay message
-await bs.exit()       // shutdown</pre>
+sync.reload()           // trigger full reload
+sync.reload(['a.css'])  // CSS inject
+sync.notify('Updated')  // overlay message
+await sync.exit()       // shutdown</pre>
       </div>
     </div>
   `

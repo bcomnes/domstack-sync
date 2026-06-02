@@ -6,7 +6,7 @@
 [![neostandard javascript style](https://img.shields.io/badge/code_style-neostandard-7fffff?style=flat&labelColor=ff80ff)](https://github.com/neostandard/neostandard)
 [![Socket Badge](https://socket.dev/api/badge/npm/package/@domstack/sync)](https://socket.dev/npm/package/@domstack/sync)
 
-A modern, minimal live-reload dev server. A love letter to browser-sync, rewritten from scratch: ESM-only, Fastify, native WebSocket, server-rendered HTMX UI panel.
+A modern, dependency-minimized live-reload dev server. A love letter to browser-sync: ESM-only, Fastify, native WebSocket, and a server-rendered HTMX UI panel.
 
 ## Install
 
@@ -47,7 +47,8 @@ domstack-sync reload --port 3000
 | `--no-notify` | — | Disable the notification overlay |
 | `--no-ghost-mode` | — | Disable scroll/click/form sync |
 | `--cors` | — | Enable CORS headers |
-| `--log-level` | `info` | `silent` \| `info` \| `debug` |
+| `--log-level` | `info` | `silent` \| `debug` \| `info` \| `warn` \| `error` |
+| `--log-connections` | — | Log browser connection events at info level |
 | `--help`, `-h` | — | Show help text |
 | `--version`, `-v` | — | Show version |
 
@@ -56,38 +57,38 @@ domstack-sync reload --port 3000
 ```js
 import { createServer, parseOptions } from '@domstack/sync'
 
-const bs = await createServer({
+const sync = await createServer({
   server: './public',
   files: ['public/**/*.css', 'public/**/*.html'],
   port: 3000,
 })
 
-console.log(bs.url)    // http://localhost:3000
-console.log(bs.uiUrl)  // http://localhost:3001
+console.log(sync.url)    // http://localhost:3000
+console.log(sync.uiUrl)  // http://localhost:3001
 
 // Trigger a full reload
-bs.reload()
+sync.reload()
 
 // CSS-inject a specific file (falls back to full reload if not matched)
-bs.reload(['styles/main.css'])
+sync.reload(['styles/main.css'])
 
 // Show a notification overlay in connected browsers
-bs.notify('Build complete')
+sync.notify('Build complete')
 
 // Stream integration — pipe any { path } objects through to trigger reloads
-someReadableStream.pipe(bs.stream())
+someReadableStream.pipe(sync.stream())
 
 // Listen for server-side events
-bs.events.on('client:connect', (info) => console.log('connected', info.ua))
-bs.events.on('client:disconnect', (id) => console.log('disconnected', id))
-bs.events.on('file:change', (evt) => console.log('changed', evt.path))
+sync.events.on('client:connect', (info) => console.log('connected', info.ua))
+sync.events.on('client:disconnect', (id) => console.log('disconnected', id))
+sync.events.on('file:change', (evt) => console.log('changed', evt.path))
 
 // Pause / resume watcher-triggered reloads (e.g. during a build)
-bs.pause()
-bs.resume()
+sync.pause()
+sync.resume()
 
 // Graceful shutdown
-await bs.exit()
+await sync.exit()
 ```
 
 ## Options
@@ -98,7 +99,8 @@ await bs.exit()
 | `server` | `string \| false` | `false` | Directory to serve statically |
 | `files` | `string[]` | `[]` | Glob patterns to watch for changes |
 | `ghostMode` | `{ scroll, clicks, forms }` | all `true` | Sync interactions across connected browsers |
-| `logLevel` | `'silent' \| 'info' \| 'debug'` | `'info'` | Log verbosity |
+| `logLevel` | `'silent' \| 'debug' \| 'info' \| 'warn' \| 'error'` | `'info'` | Log verbosity |
+| `logConnections` | `boolean` | `false` | Log browser connection events at info level |
 | `ui` | `boolean \| { port: number }` | `true` | UI panel — `false` disables, `{ port }` pins the port |
 | `notify` | `boolean` | `true` | Show notification overlay in connected browsers |
 | `cors` | `boolean` | `false` | Add CORS headers to all responses |

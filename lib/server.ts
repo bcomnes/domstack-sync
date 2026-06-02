@@ -175,7 +175,9 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
   const localIp = getLocalIp()
   const events = new EventEmitter()
 
-  const fastify = Fastify({ logger: false }).withTypeProvider<JsonSchemaToTsProvider>()
+  const fastify = Fastify(opts.logLevel === 'debug'
+    ? { loggerInstance: logger.pino.child({ component: 'fastify' }) }
+    : { logger: false }).withTypeProvider<JsonSchemaToTsProvider>()
   let noCacheEnabled = false
   let responseLatencyMs = 0
   const runtimeMiddlewares: RuntimeMiddlewareEntry[] = []
@@ -276,7 +278,7 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
   fastify.post('/__bs/notify', { schema: notifyRouteSchema }, async (req, reply) => {
     const body = req.body as { message?: string } | null
     const message = typeof body?.message === 'string' ? body.message : ''
-    sockets.broadcast({ type: 'notify', message })
+    doNotify(message)
     return reply.send({ ok: true })
   })
 
@@ -371,10 +373,16 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
 
   // Forward socket events onto the public EventEmitter
   sockets.on('client:connect', (info) => {
+    if (opts.logConnections) logger.info('Browser Connected: %s, version: %s', info.browser.name, info.browser.version)
+    else logger.debug('Browser Connected: %s, version: %s', info.browser.name, info.browser.version)
     events.emit('client:connect', info)
     sendPluginElementsToClient(info.id)
   })
-  sockets.on('client:disconnect', (id) => events.emit('client:disconnect', id))
+  sockets.on('client:disconnect', (id) => {
+    if (opts.logConnections) logger.info('Browser Disconnected: %s', id)
+    else logger.debug('Browser Disconnected: %s', id)
+    events.emit('client:disconnect', id)
+  })
   sockets.on('client:update', (info) => events.emit('client:update', info))
 
   fastify.server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
@@ -387,6 +395,10 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
   let watcher: BsWatcher | null = null
   let paused = false
   const watchFiles = [...opts.files, ...pluginManager.getWatchEntries(pluginApi)]
+
+  function logFileEvent (evt: WatchEvent): void {
+    logger.info('File event [%s] : %s', evt.event, evt.path)
+  }
 
   if (watchFiles.length > 0) {
     watcher = new BsWatcher({
@@ -401,6 +413,7 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
     watcher.on('changes', (batch: WatchEvent[]) => {
       if (paused) return
       for (const evt of batch) {
+        logFileEvent(evt)
         events.emit('file:change', evt)
       }
       scheduleFileBroadcast(batch.map(evt => evt.path))
@@ -410,18 +423,21 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
   await fastify.listen({ port, host: '0.0.0.0' })
 
   const url = `http://localhost:${port}`
+  const externalUrl = `http://${localIp}:${port}`
   logger.info(`Server started at ${url}`)
-  logger.info(`Network: http://${localIp}:${port}`)
 
   // UI panel
   let uiInstance: Awaited<ReturnType<typeof createUiServer>> | null = null
+  let uiUrl: string | null = null
+  let uiExternalUrl: string | null = null
   const throttleServers = new Map<number, ReturnType<typeof createThrottleServer>>()
 
   if (opts.ui !== false) {
     const uiPort = typeof opts.ui === 'object'
       ? opts.ui.port
       : await findFreePort(port + 1)
-    const uiUrl = `http://127.0.0.1:${uiPort}`
+    uiUrl = `http://127.0.0.1:${uiPort}`
+    uiExternalUrl = `http://${localIp}:${uiPort}`
 
     uiInstance = await createUiServer({
       uiPort,
@@ -451,8 +467,18 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
       configureUserPlugin,
       handleUiEvent: (event) => pluginManager.handleUiEvent(event),
     })
+  }
 
-    logger.info(`UI panel at ${uiUrl}`)
+  logger.urls({ local: url, external: externalUrl, ui: uiUrl, uiExternal: uiExternalUrl })
+
+  if (serverRoots.length > 0) {
+    for (const root of serverRoots) {
+      logger.info('Serving files from: %s', root)
+    }
+  }
+
+  if (watchFiles.length > 0) {
+    logger.info('Watching files...')
   }
 
   let lastFileBroadcastAt = 0
@@ -470,6 +496,8 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
       }
       return
     }
+    if (files && files.length > 1) logger.info('Reloading Browsers... (buffered %s events)', files.length)
+    else logger.info('Reloading Browsers...')
     sockets.broadcast({ type: 'reload' })
   }
 
@@ -477,7 +505,9 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
     const files = getReloadFiles(arg)
     if (files) {
       for (const file of files) {
-        events.emit('file:change', { path: file, event: 'change', namespace: 'core', timestamp: Date.now() } satisfies WatchEvent)
+        const evt = { path: file, event: 'change', namespace: 'core', timestamp: Date.now() } satisfies WatchEvent
+        logFileEvent(evt)
+        events.emit('file:change', evt)
       }
     }
     queuePublicReload(files)
@@ -539,6 +569,7 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
   }
 
   function doNotify (message: string): void {
+    logger.info('Notify: %s', message)
     sockets.broadcast({ type: 'notify', message })
   }
 
@@ -569,6 +600,7 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
       },
       flush (callback) {
         if (streamOpts.once !== true && changed.length > 0) {
+          logger.info('%s %s changed (%s)', changed.length, changed.length > 1 ? 'files' : 'file', changedBasenames.join(', '))
           events.emit('stream:changed', { changed: changedBasenames })
           broadcastFiles(changed)
         }
@@ -737,6 +769,7 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
     notify: doNotify,
     stream: createReloadStream,
     async exit () {
+      logger.debug('Exiting...')
       if (publicReloadDebounceTimer) clearTimeout(publicReloadDebounceTimer)
       for (const timer of reloadDelayTimers) clearTimeout(timer)
       reloadDelayTimers.clear()
