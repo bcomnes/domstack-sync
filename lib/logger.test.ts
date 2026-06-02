@@ -82,3 +82,20 @@ test('createLogger: exposes a pino instance with the same formatter', () => {
   assert.match(output, /\[domstack-sync\] HTTP request: GET \/index\.html/)
   assert.match(output, /\[domstack-sync\] HTTP response: GET \/index\.html -> 200 \(12ms\)/)
 })
+
+test('createLogger: lets pino-pretty colorize structured context for TTY output', () => {
+  const stdout = Object.assign(new MemoryStream(), { isTTY: true })
+  const logger = createLogger('info', { stdout, stderr: stdout })
+
+  logger.info({ event: 'change', path: 'public/index.html' }, 'File event')
+  logger.info({ files: ['public/index.html'], count: 1 }, 'Reloading Browsers...')
+  logger.urls({ local: 'http://localhost:3000' })
+
+  const output = stdout.toString()
+  assert.ok(output.includes('\u001B['))
+  assert.match(output, /\[domstack-sync\]/)
+  assert.match(output, /"event":"change"/)
+  assert.match(output, /public\/index\.html/)
+  assert.match(output, /"count":1/)
+  assert.match(output, /http:\/\/localhost:3000/)
+})

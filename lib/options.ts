@@ -2,6 +2,7 @@ import type { FromSchema, JSONSchema } from 'json-schema-to-ts'
 import type { FormsGhostModeOptions, GhostModeOptions, ClientRuntimeOptionsPatch } from './protocol.ts'
 import type { BrowserSyncPluginEntry } from './plugin-types.ts'
 import type { InjectorRule, RewriteRule } from './injector.ts'
+import type { Logger } from './logger.ts'
 
 export interface FileWatchObject {
   match: string | string[]
@@ -179,6 +180,7 @@ export type GhostModeInput = boolean | (Partial<Omit<GhostModeOptions, 'forms'>>
 export type BsOptionsInput = Omit<FromSchema<typeof bsOptionsSchema>, 'files' | 'ghostMode' | 'plugins' | 'server' | 'snippetOptions' | 'rewriteRules'> & {
   files?: FileWatchEntry | FileWatchEntry[]
   ghostMode?: GhostModeInput
+  logger?: Logger | undefined
   plugins?: BrowserSyncPluginEntry[]
   server?: string | boolean | string[] | ServerOptionsInput
   snippetOptions?: SnippetOptionsInput
@@ -190,6 +192,7 @@ export interface BsOptions {
   files: FileWatchEntry[]
   server: ServerOptions | false
   ghostMode: GhostModeOptions
+  logger?: Logger | undefined
   logLevel: 'silent' | 'debug' | 'info' | 'warn' | 'error'
   logConnections: boolean
   ui: boolean | { port: number }
@@ -227,6 +230,7 @@ export function parseOptions (raw: BsOptionsInput = {}): BsOptions {
     files,
     server,
     ghostMode: ghost,
+    logger: raw.logger,
     logLevel: raw.logLevel ?? 'info',
     logConnections: raw.logConnections ?? false,
     ui: raw.ui ?? true,

@@ -1,13 +1,17 @@
 import pino from 'pino'
 import pretty from 'pino-pretty'
 import { Writable } from 'node:stream'
-import { format } from 'node:util'
 import type { Logger as PinoLogger } from 'pino'
 import type { Writable as WritableType } from 'node:stream'
 
 export type LogLevel = 'silent' | 'debug' | 'info' | 'warn' | 'error'
 type LogMethod = Exclude<LogLevel, 'silent'>
 type LogStream = Pick<WritableType, 'write'>
+export type LogContext = Record<string, unknown>
+export type LogFunction = {
+  (message: string, ...args: unknown[]): void
+  (context: LogContext, message: string, ...args: unknown[]): void
+}
 
 export interface LoggerStreams {
   stdout?: LogStream
@@ -21,12 +25,17 @@ export interface AccessUrls {
   uiExternal?: string | null
 }
 
+export interface LoggerOptions {
+  prefix?: string | false
+}
+
 export interface Logger {
   pino: PinoLogger
-  debug: (message: string, ...args: unknown[]) => void
-  info: (message: string, ...args: unknown[]) => void
-  warn: (message: string, ...args: unknown[]) => void
-  error: (message: string, ...args: unknown[]) => void
+  child: (bindings: LogContext, options?: LoggerOptions) => Logger
+  debug: LogFunction
+  info: LogFunction
+  warn: LogFunction
+  error: LogFunction
   unprefixed: (level: LogMethod, message: string, ...args: unknown[]) => void
   urls: (urls: AccessUrls) => void
 }
@@ -41,14 +50,15 @@ const LOG_LEVELS = {
   silent: 50,
 } as const satisfies Record<LogLevel, number>
 
-export function createLogger (level: LogLevel | string = 'info', streams: LoggerStreams = {}): Logger {
+export function createLogger (level: LogLevel | string = 'info', streams: LoggerStreams = {}, options: LoggerOptions = {}): Logger {
   const logLevel = normalizeLogLevel(level)
   const rawStdout = streams.stdout ?? process.stdout
   const stdout = toWritableStream(rawStdout)
   const stream = pretty({
     colorize: isTty(rawStdout),
-    hideObject: true,
-    ignore: 'pid,hostname,time,level,bsPrefix,component,req,reqId,res,responseTime',
+    hideObject: false,
+    singleLine: true,
+    ignore: 'pid,hostname,time,level,logPrefix,component,req,reqId,res,responseTime',
     messageFormat: formatPrettyMessage,
     destination: stdout,
     sync: true,
@@ -59,30 +69,43 @@ export function createLogger (level: LogLevel | string = 'info', streams: Logger
     timestamp: false,
   }, stream)
 
-  const log = (method: LogMethod, message: string, ...args: unknown[]): void => {
-    emit(pinoLogger, method, { bsPrefix: true }, format(message, ...args))
-  }
+  return wrapPinoLogger(pinoLogger, options)
+}
+
+export function wrapPinoLogger (pinoLogger: PinoLogger, options: LoggerOptions = {}): Logger {
+  const prefix = options.prefix ?? PREFIX
 
   const unprefixed = (method: LogMethod, message: string, ...args: unknown[]): void => {
-    emit(pinoLogger, method, { bsPrefix: false }, format(message, ...args))
+    emit(pinoLogger, method, { logPrefix: false }, message, args)
+  }
+
+  const log = (method: LogMethod, input: string | LogContext, ...args: unknown[]): void => {
+    if (typeof input === 'string') {
+      emit(pinoLogger, method, { logPrefix: prefix }, input, args)
+      return
+    }
+
+    const [message, ...messageArgs] = args
+    emit(pinoLogger, method, { ...input, logPrefix: prefix }, String(message ?? ''), messageArgs)
   }
 
   return {
     pino: pinoLogger,
-    debug: (message, ...args) => log('debug', message, ...args),
-    info: (message, ...args) => log('info', message, ...args),
-    warn: (message, ...args) => log('warn', message, ...args),
-    error: (message, ...args) => log('error', message, ...args),
+    child: (bindings, childOptions) => wrapPinoLogger(pinoLogger.child(bindings), { prefix, ...childOptions }),
+    debug: (input, ...args) => log('debug', input, ...args),
+    info: (input, ...args) => log('info', input, ...args),
+    warn: (input, ...args) => log('warn', input, ...args),
+    error: (input, ...args) => log('error', input, ...args),
     unprefixed,
     urls: urls => logAccessUrls(urls, { info: (message, ...args) => log('info', message, ...args), unprefixed }),
   }
 }
 
-function emit (logger: PinoLogger, level: LogMethod, bindings: Record<string, unknown>, message: string): void {
-  if (level === 'debug') logger.debug(bindings, message)
-  else if (level === 'info') logger.info(bindings, message)
-  else if (level === 'warn') logger.warn(bindings, message)
-  else logger.error(bindings, message)
+function emit (logger: PinoLogger, level: LogMethod, bindings: Record<string, unknown>, message: string, args: unknown[]): void {
+  if (level === 'debug') logger.debug(bindings, message, ...args)
+  else if (level === 'info') logger.info(bindings, message, ...args)
+  else if (level === 'warn') logger.warn(bindings, message, ...args)
+  else logger.error(bindings, message, ...args)
 }
 
 function normalizeLogLevel (level: LogLevel | string): LogLevel {
@@ -113,7 +136,9 @@ function formatPrettyMessage (log: Record<string, unknown>, messageKey: string):
     ? formatFastifyMessage(log, message)
     : message
 
-  return log['bsPrefix'] === false ? formatted : `${PREFIX} ${formatted}`
+  if (log['logPrefix'] === false) return formatted
+  const prefix = typeof log['logPrefix'] === 'string' ? log['logPrefix'] : PREFIX
+  return `${prefix} ${formatted}`
 }
 
 function formatFastifyMessage (log: Record<string, unknown>, fallback: string): string {

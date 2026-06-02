@@ -172,7 +172,7 @@ const notifyRouteSchema = {
 
 export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): Promise<BsInstance> {
   const opts = parseOptions(rawOpts)
-  const logger = createLogger(opts.logLevel)
+  const logger = opts.logger ?? createLogger(opts.logLevel)
   const port = await findFreePort(opts.port)
   const localIp = getLocalIp()
   const events = new EventEmitter()
@@ -375,14 +375,15 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
 
   // Forward socket events onto the public EventEmitter
   sockets.on('client:connect', (info) => {
-    if (opts.logConnections) logger.info('Browser Connected: %s, version: %s', info.browser.name, info.browser.version)
-    else logger.debug('Browser Connected: %s, version: %s', info.browser.name, info.browser.version)
+    const context = { browser: info.browser.name, version: info.browser.version, id: info.id }
+    if (opts.logConnections) logger.info(context, 'Browser connected')
+    else logger.debug(context, 'Browser connected')
     events.emit('client:connect', info)
     sendPluginElementsToClient(info.id)
   })
   sockets.on('client:disconnect', (id) => {
-    if (opts.logConnections) logger.info('Browser Disconnected: %s', id)
-    else logger.debug('Browser Disconnected: %s', id)
+    if (opts.logConnections) logger.info({ id }, 'Browser disconnected')
+    else logger.debug({ id }, 'Browser disconnected')
     events.emit('client:disconnect', id)
   })
   sockets.on('client:update', (info) => events.emit('client:update', info))
@@ -399,7 +400,7 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
   const watchFiles = [...opts.files, ...pluginManager.getWatchEntries(pluginApi)]
 
   function logFileEvent (evt: WatchEvent): void {
-    logger.info('File event [%s] : %s', evt.event, evt.path)
+    logger.info({ event: evt.event, path: evt.path, namespace: evt.namespace }, 'File event')
   }
 
   if (watchFiles.length > 0) {
@@ -426,7 +427,7 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
 
   const url = `http://localhost:${port}`
   const externalUrl = `http://${localIp}:${port}`
-  logger.info(`Server started at ${url}`)
+  logger.info({ url }, `Server started at ${url}`)
 
   // UI panel
   let uiInstance: Awaited<ReturnType<typeof createUiServer>> | null = null
@@ -475,7 +476,7 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
 
   if (serverRoots.length > 0) {
     for (const root of serverRoots) {
-      logger.info('Serving files from: %s', root)
+      logger.info({ root }, 'Serving files')
     }
   }
 
@@ -498,8 +499,8 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
       }
       return
     }
-    if (files && files.length > 1) logger.info('Reloading Browsers... (buffered %s events)', files.length)
-    else logger.info('Reloading Browsers...')
+    if (files && files.length > 1) logger.info({ files, count: files.length }, 'Reloading Browsers... (buffered %s events)', files.length)
+    else logger.info(files ? { files, count: files.length } : {}, 'Reloading Browsers...')
     sockets.broadcast({ type: 'reload' })
   }
 
@@ -571,7 +572,7 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
   }
 
   function doNotify (message: string): void {
-    logger.info('Notify: %s', message)
+    logger.info({ notification: message }, 'Notify')
     sockets.broadcast({ type: 'notify', message })
   }
 
@@ -602,7 +603,7 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
       },
       flush (callback) {
         if (streamOpts.once !== true && changed.length > 0) {
-          logger.info('%s %s changed (%s)', changed.length, changed.length > 1 ? 'files' : 'file', changedBasenames.join(', '))
+          logger.info({ changed, changedBasenames, count: changed.length }, '%s %s changed (%s)', changed.length, changed.length > 1 ? 'files' : 'file', changedBasenames.join(', '))
           events.emit('stream:changed', { changed: changedBasenames })
           broadcastFiles(changed)
         }
