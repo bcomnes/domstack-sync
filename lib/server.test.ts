@@ -885,6 +885,12 @@ test('createServer: remote debug assets are served from the main server', { time
   assert.ok((res.headers.get('content-type') ?? '').includes('text/css'))
   const css = await res.text()
   assert.ok(css.includes('outline'))
+
+  const depthRes = await fetch(`${bs.url}/browser-sync/pesticide-depth.css`)
+  assert.strictEqual(depthRes.status, 200)
+  assert.ok((depthRes.headers.get('content-type') ?? '').includes('text/css'))
+  const depthCss = await depthRes.text()
+  assert.ok(depthCss.includes('box-shadow'))
 })
 
 test('createServer: remote debug no-cache UI control affects responses', { timeout: 10000 }, async (t) => {

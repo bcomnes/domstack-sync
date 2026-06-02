@@ -8,6 +8,7 @@ import { Transform } from 'node:stream'
 import { readFileSync } from 'node:fs'
 import { basename, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
 import { createServer as createNetServer } from 'node:net'
 import type { AddressInfo } from 'node:net'
 import picomatch from 'picomatch'
@@ -32,6 +33,7 @@ import type { Duplex } from 'node:stream'
 import type { BrowserSyncPluginApi, PluginMiddleware, PluginMiddlewareOptions, PluginServeFileOptions } from './plugin-types.ts'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
+const require = createRequire(import.meta.url)
 
 export interface BsInstance {
   url: string
@@ -232,8 +234,8 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
   })
 
   const remoteDebugAssets = [
-    { path: '/browser-sync/pesticide.css', file: resolve(__dirname, 'client/assets/pesticide.css') },
-    { path: '/browser-sync/pesticide-depth.css', file: resolve(__dirname, 'client/assets/pesticide-depth.css') },
+    { path: '/browser-sync/pesticide.css', file: require.resolve('pesticide/css/pesticide.css') },
+    { path: '/browser-sync/pesticide-depth.css', file: require.resolve('pesticide/css/pesticide-depth.css') },
   ]
 
   for (const asset of remoteDebugAssets) {
