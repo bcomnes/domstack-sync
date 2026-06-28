@@ -3,7 +3,7 @@ import { WebSocketServer, WebSocket } from 'ws'
 import type { IncomingMessage } from 'node:http'
 import type { Duplex } from 'node:stream'
 import type { ServerToClientMessage, GhostMessage, PathScopedGhostMessage, ClientInfoMessage, ClientRuntimeOptions } from './protocol.ts'
-import type { Logger } from './logger.ts'
+import type { Logger as PinoLogger } from 'pino'
 
 export interface BrowserInfo {
   name: string
@@ -21,7 +21,7 @@ export interface BsClientInfo {
 }
 
 export interface SocketsOptions {
-  logger: Logger
+  logger: PinoLogger
   getRuntimeOptions?: () => ClientRuntimeOptions
   getPluginClientEvents?: () => string[]
 }

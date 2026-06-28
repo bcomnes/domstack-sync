@@ -52,7 +52,7 @@ domstack-sync reload --port 3000
 | `--no-notify` | — | Disable the notification overlay |
 | `--no-ghost-mode` | — | Disable scroll/click/location/form sync |
 | `--cors` | — | Enable CORS headers |
-| `--log-level` | `info` | `silent` \| `debug` \| `info` \| `warn` \| `error` |
+| `--log-level` | `info` | Pino log level, for example `silent`, `trace`, `debug`, `info`, `warn`, `error`, or `fatal` |
 | `--log-connections` | — | Log browser connection events at info level |
 | `--help`, `-h` | — | Show help text |
 | `--version`, `-v` | — | Show version |
@@ -98,6 +98,33 @@ sync.resume()
 await sync.exit()
 ```
 
+### Logging
+
+Standalone usage creates a pretty Pino logger automatically. When embedding `@domstack/sync` in another tool, pass a raw Pino logger and keep formatting ownership in the parent process:
+
+```js
+import pino from 'pino'
+import { createLogger, createServer, logAccessUrls } from '@domstack/sync'
+
+// Standalone helper: returns a regular pino.Logger with domstack-sync's pretty formatter.
+const standaloneLogger = createLogger('info')
+
+// Embedded/library usage: pass your own raw pino.Logger.
+const ownerLogger = pino({ level: 'info' })
+const sync = await createServer({
+  server: './public',
+  files: ['public/**/*.css', 'public/**/*.html'],
+  logger: ownerLogger.child({ component: 'sync', logPrefix: '[domstack-sync]' }),
+})
+
+logAccessUrls(standaloneLogger, {
+  local: sync.url,
+  ui: sync.uiUrl,
+})
+```
+
+`logAccessUrls(logger, urls)` is exported for callers that want the same access-URL table with their own Pino logger.
+
 ## Options
 
 | Option | Type | Default | Description |
@@ -106,7 +133,8 @@ await sync.exit()
 | `server` | `string \| boolean \| string[] \| object` | `false` | Directory or directories to serve statically |
 | `files` | `string \| string[] \| object[]` | `[]` | Glob patterns or chokidar watch objects to watch for changes |
 | `ghostMode` | `boolean \| { scroll, clicks, location, forms }` | all `true` | Sync interactions across connected browsers |
-| `logLevel` | `'silent' \| 'debug' \| 'info' \| 'warn' \| 'error'` | `'info'` | Log verbosity |
+| `logger` | `pino.Logger` | — | Raw Pino logger supplied by an embedding owner; when omitted, sync creates its own standalone pretty logger |
+| `logLevel` | Pino log level string | `'info'` | Log verbosity used by the standalone logger when `logger` is omitted |
 | `logConnections` | `boolean` | `false` | Log browser connection events at info level |
 | `ui` | `boolean \| { port: number }` | `true` | UI panel — `false` disables, `{ port }` pins the port |
 | `notify` | `boolean` | `true` | Show notification overlay in connected browsers |
@@ -137,7 +165,7 @@ await sync.exit()
 All types are exported:
 
 ```ts
-import type { BsInstance, BsOptions, BsOptionsInput } from '@domstack/sync'
+import type { AccessUrls, BsInstance, BsOptions, BsOptionsInput, LoggerOptions, LoggerStreams } from '@domstack/sync'
 import type { ServerToClientMessage, ClientToServerMessage } from '@domstack/sync'
 ```
 

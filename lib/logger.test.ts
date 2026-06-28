@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert'
-import { createLogger } from './logger.ts'
+import { createLogger, logAccessUrls } from './logger.ts'
 
 class MemoryStream {
   chunks: string[] = []
@@ -20,7 +20,7 @@ test('createLogger: prints BrowserSync-style prefixed messages and access URLs',
   const logger = createLogger('info', { stdout, stderr: stdout })
 
   logger.info('Serving files from: %s', 'public')
-  logger.urls({
+  logAccessUrls(logger, {
     local: 'http://localhost:3000',
     external: 'http://192.168.1.2:3000',
     ui: 'http://127.0.0.1:3001',
@@ -42,7 +42,7 @@ test('createLogger: respects silent and debug log levels', () => {
 
   silent.info('hidden')
   silent.warn('hidden')
-  silent.urls({ local: 'http://localhost:3000' })
+  logAccessUrls(silent, { local: 'http://localhost:3000' })
 
   assert.strictEqual(silentStdout.toString(), '')
 
@@ -63,15 +63,15 @@ test('createLogger: respects silent and debug log levels', () => {
   assert.ok(debugStdout.toString().includes('debug shown'))
 })
 
-test('createLogger: exposes a pino instance with the same formatter', () => {
+test('createLogger: returns a pino instance with the standalone formatter', () => {
   const stdout = new MemoryStream()
   const logger = createLogger('debug', { stdout, stderr: stdout })
 
-  logger.pino.info('pino event')
-  logger.pino.child({ component: 'fastify' }).info({
+  logger.info('pino event')
+  logger.child({ component: 'fastify' }).info({
     req: { method: 'GET', url: '/index.html' },
   }, 'incoming request')
-  logger.pino.child({ component: 'fastify' }).info({
+  logger.child({ component: 'fastify' }).info({
     req: { method: 'GET', url: '/index.html' },
     res: { statusCode: 200 },
     responseTime: 12.3,
@@ -89,7 +89,7 @@ test('createLogger: lets pino-pretty colorize structured context for TTY output'
 
   logger.info({ event: 'change', path: 'public/index.html' }, 'File event')
   logger.info({ files: ['public/index.html'], count: 1 }, 'Reloading Browsers...')
-  logger.urls({ local: 'http://localhost:3000' })
+  logAccessUrls(logger, { local: 'http://localhost:3000' })
 
   const output = stdout.toString()
   assert.ok(output.includes('\u001B['))

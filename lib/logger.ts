@@ -1,17 +1,13 @@
 import pino from 'pino'
 import pretty from 'pino-pretty'
 import { Writable } from 'node:stream'
-import type { Logger as PinoLogger } from 'pino'
+import type { LevelWithSilentOrString, Logger as PinoLogger } from 'pino'
+import type { PrettyOptions } from 'pino-pretty'
 import type { Writable as WritableType } from 'node:stream'
 
-export type LogLevel = 'silent' | 'debug' | 'info' | 'warn' | 'error'
-type LogMethod = Exclude<LogLevel, 'silent'>
+type LogMethod = 'debug' | 'info' | 'warn' | 'error'
 type LogStream = Pick<WritableType, 'write'>
-export type LogContext = Record<string, unknown>
-export type LogFunction = {
-  (message: string, ...args: unknown[]): void
-  (context: LogContext, message: string, ...args: unknown[]): void
-}
+type PrettyMessageFormat = Exclude<NonNullable<PrettyOptions['messageFormat']>, string | false>
 
 export interface LoggerStreams {
   stdout?: LogStream
@@ -29,29 +25,9 @@ export interface LoggerOptions {
   prefix?: string | false
 }
 
-export interface Logger {
-  pino: PinoLogger
-  child: (bindings: LogContext, options?: LoggerOptions) => Logger
-  debug: LogFunction
-  info: LogFunction
-  warn: LogFunction
-  error: LogFunction
-  unprefixed: (level: LogMethod, message: string, ...args: unknown[]) => void
-  urls: (urls: AccessUrls) => void
-}
-
 const PREFIX = '[domstack-sync]'
 
-const LOG_LEVELS = {
-  debug: 10,
-  info: 20,
-  warn: 30,
-  error: 40,
-  silent: 50,
-} as const satisfies Record<LogLevel, number>
-
-export function createLogger (level: LogLevel | string = 'info', streams: LoggerStreams = {}, options: LoggerOptions = {}): Logger {
-  const logLevel = normalizeLogLevel(level)
+export function createLogger (level: LevelWithSilentOrString = 'info', streams: LoggerStreams = {}, options: LoggerOptions = {}): PinoLogger {
   const rawStdout = streams.stdout ?? process.stdout
   const stdout = toWritableStream(rawStdout)
   const stream = pretty({
@@ -63,58 +39,53 @@ export function createLogger (level: LogLevel | string = 'info', streams: Logger
     destination: stdout,
     sync: true,
   })
-  const pinoLogger = pino({
-    level: logLevel,
+  const logger = pino({
+    level,
     base: null,
     timestamp: false,
   }, stream)
 
-  return wrapPinoLogger(pinoLogger, options)
+  return logger.child({ logPrefix: options.prefix ?? PREFIX })
 }
 
-export function wrapPinoLogger (pinoLogger: PinoLogger, options: LoggerOptions = {}): Logger {
-  const prefix = options.prefix ?? PREFIX
+export function logAccessUrls (logger: PinoLogger, urls: AccessUrls): void {
+  const entries = [
+    ['local', urls.local],
+    ['external', urls.external],
+    ['ui', urls.ui],
+    ['ui-external', urls.uiExternal],
+  ] as const
+  const filtered = entries.filter((entry): entry is [typeof entry[0], string] => typeof entry[1] === 'string' && entry[1].length > 0)
+  if (filtered.length === 0) return
 
-  const unprefixed = (method: LogMethod, message: string, ...args: unknown[]): void => {
-    emit(pinoLogger, method, { logPrefix: false }, message, args)
-  }
+  const longestName = Math.max(...filtered.map(([key]) => getUrlLabel(key).length))
+  const longestUrl = Math.max(...filtered.map(([, url]) => url.length))
+  const underline = '-'.repeat(longestName + longestUrl + 4)
+  let splitUi = false
 
-  const log = (method: LogMethod, input: string | LogContext, ...args: unknown[]): void => {
-    if (typeof input === 'string') {
-      emit(pinoLogger, method, { logPrefix: prefix }, input, args)
-      return
+  logger.info('Access URLs:')
+  logUnprefixed(logger, 'info', ' %s', underline)
+
+  for (const [key, url] of filtered) {
+    if (!splitUi && key.startsWith('ui')) {
+      splitUi = true
+      logUnprefixed(logger, 'info', ' %s', underline)
     }
 
-    const [message, ...messageArgs] = args
-    emit(pinoLogger, method, { ...input, logPrefix: prefix }, String(message ?? ''), messageArgs)
+    logUnprefixed(logger, 'info', ' %s: %s', getUrlLabel(key).padStart(longestName), url)
   }
 
-  return {
-    pino: pinoLogger,
-    child: (bindings, childOptions) => wrapPinoLogger(pinoLogger.child(bindings), { prefix, ...childOptions }),
-    debug: (input, ...args) => log('debug', input, ...args),
-    info: (input, ...args) => log('info', input, ...args),
-    warn: (input, ...args) => log('warn', input, ...args),
-    error: (input, ...args) => log('error', input, ...args),
-    unprefixed,
-    urls: urls => logAccessUrls(urls, { info: (message, ...args) => log('info', message, ...args), unprefixed }),
-  }
+  logUnprefixed(logger, 'info', ' %s', underline)
 }
 
-function emit (logger: PinoLogger, level: LogMethod, bindings: Record<string, unknown>, message: string, args: unknown[]): void {
-  if (level === 'debug') logger.debug(bindings, message, ...args)
-  else if (level === 'info') logger.info(bindings, message, ...args)
-  else if (level === 'warn') logger.warn(bindings, message, ...args)
-  else logger.error(bindings, message, ...args)
+function logUnprefixed (logger: PinoLogger, level: LogMethod, message: string, ...args: unknown[]): void {
+  if (level === 'debug') logger.debug({ logPrefix: false }, message, ...args)
+  else if (level === 'info') logger.info({ logPrefix: false }, message, ...args)
+  else if (level === 'warn') logger.warn({ logPrefix: false }, message, ...args)
+  else logger.error({ logPrefix: false }, message, ...args)
 }
 
-function normalizeLogLevel (level: LogLevel | string): LogLevel {
-  return isLogLevel(level) ? level : 'info'
-}
 
-function isLogLevel (level: string): level is LogLevel {
-  return level in LOG_LEVELS
-}
 
 function toWritableStream (stream: LogStream): NodeJS.WritableStream {
   return new Writable({
@@ -129,7 +100,7 @@ function isTty (stream: LogStream): boolean {
   return Boolean((stream as Partial<NodeJS.WriteStream>).isTTY)
 }
 
-function formatPrettyMessage (log: Record<string, unknown>, messageKey: string): string {
+const formatPrettyMessage: PrettyMessageFormat = (log, messageKey) => {
   const rawMessage = log[messageKey]
   const message = typeof rawMessage === 'string' ? rawMessage : String(rawMessage ?? '')
   const formatted = log['component'] === 'fastify'
@@ -168,39 +139,6 @@ function formatFastifyMessage (log: Record<string, unknown>, fallback: string): 
 
 function getRecord (value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' ? value as Record<string, unknown> : null
-}
-
-function logAccessUrls (
-  urls: AccessUrls,
-  logger: Pick<Logger, 'info' | 'unprefixed'>
-): void {
-  const entries = [
-    ['local', urls.local],
-    ['external', urls.external],
-    ['ui', urls.ui],
-    ['ui-external', urls.uiExternal],
-  ] as const
-  const filtered = entries.filter((entry): entry is [typeof entry[0], string] => typeof entry[1] === 'string' && entry[1].length > 0)
-  if (filtered.length === 0) return
-
-  const longestName = Math.max(...filtered.map(([key]) => getUrlLabel(key).length))
-  const longestUrl = Math.max(...filtered.map(([, url]) => url.length))
-  const underline = '-'.repeat(longestName + longestUrl + 4)
-  let splitUi = false
-
-  logger.info('Access URLs:')
-  logger.unprefixed('info', ' %s', underline)
-
-  for (const [key, url] of filtered) {
-    if (!splitUi && key.startsWith('ui')) {
-      splitUi = true
-      logger.unprefixed('info', ' %s', underline)
-    }
-
-    logger.unprefixed('info', ' %s: %s', getUrlLabel(key).padStart(longestName), url)
-  }
-
-  logger.unprefixed('info', ' %s', underline)
 }
 
 function getUrlLabel (key: 'local' | 'external' | 'ui' | 'ui-external'): string {

@@ -10,3 +10,13 @@ lib/ui/public/app.js
 lib/ui/public/app.css
 test-results
 plans/
+
+# TypeScript build output
+/*.js
+!/*.config.js
+/*.d.ts
+/*.d.ts.map
+/lib/**/*.js
+/lib/**/*.d.ts
+/lib/**/*.d.ts.map
+!/lib/ui/htmx-types.d.ts

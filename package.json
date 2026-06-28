@@ -79,7 +79,7 @@
     "test": "run-s test:*",
     "test:lint": "eslint .",
     "test:tsc": "tsc",
-    "test:node-test": "node --experimental-test-coverage --test-reporter=spec --test-reporter=lcov --test-reporter-destination=stdout --test-reporter-destination=lcov.info --test-timeout=10000 --test",
+    "test:node-test": "node --experimental-test-coverage --test-reporter=dot --test-reporter=lcov --test-reporter-destination=stdout --test-reporter-destination=lcov.info --test-timeout=10000 --test",
     "test:playwright": "run-s build:assets test:playwright:*",
     "test:playwright:run": "playwright test --timeout=10000",
     "version": "releasearoni version",

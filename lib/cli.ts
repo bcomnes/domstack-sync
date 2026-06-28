@@ -61,7 +61,7 @@ const options = {
   },
   'log-level': {
     type: 'string',
-    help: 'Log level: silent|debug|info|warn|error',
+    help: 'Pino log level (for example: silent, trace, debug, info, warn, error, fatal)',
   },
   'log-connections': {
     type: 'boolean',

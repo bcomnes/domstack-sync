@@ -18,7 +18,7 @@ import { BsWatcher } from './watcher.ts'
 import { findFreePort } from './ports.ts'
 import { createThrottleServer } from './throttle-server.ts'
 import { getLocalIp } from './ip.ts'
-import { createLogger } from './logger.ts'
+import { createLogger, logAccessUrls } from './logger.ts'
 import { createUiServer } from './ui/server.ts'
 import { getReloadDecision } from './reload-decision.ts'
 import { applyGhostModePatch, parseOptions } from './options.ts'
@@ -93,7 +93,7 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
   const events = new EventEmitter()
 
   const fastify = Fastify(opts.logLevel === 'debug'
-    ? { loggerInstance: logger.pino.child({ component: 'fastify' }) }
+    ? { loggerInstance: logger.child({ component: 'fastify' }) }
     : { logger: false }).withTypeProvider<JsonSchemaToTsProvider>()
   let noCacheEnabled = false
   let responseLatencyMs = 0
@@ -393,7 +393,7 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
     })
   }
 
-  logger.urls({ local: url, external: externalUrl, ui: uiUrl, uiExternal: uiExternalUrl })
+  logAccessUrls(logger, { local: url, external: externalUrl, ui: uiUrl, uiExternal: uiExternalUrl })
 
   if (serverRoots.length > 0) {
     for (const root of serverRoots) {
