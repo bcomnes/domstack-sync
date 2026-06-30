@@ -61,7 +61,7 @@
     "@fastify/type-provider-json-schema-to-ts": "^5.0.0",
     "@playwright/test": "^1.60.0",
     "@types/node": "^26.0.1",
-    "@types/picomatch": "^3.0.0",
+    "@types/picomatch": "^4.0.3",
     "@types/ws": "^8.0.0",
     "@voxpelli/tsconfig": "^16.1.0",
     "esbuild": "^0.28.1",
