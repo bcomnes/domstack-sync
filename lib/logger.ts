@@ -85,8 +85,6 @@ function logUnprefixed (logger: PinoLogger, level: LogMethod, message: string, .
   else logger.error({ logPrefix: false }, message, ...args)
 }
 
-
-
 function toWritableStream (stream: LogStream): NodeJS.WritableStream {
   return new Writable({
     write (chunk, _encoding, callback) {
