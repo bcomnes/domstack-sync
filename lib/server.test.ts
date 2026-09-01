@@ -541,6 +541,29 @@ test('createServer: .reload() accepts a single file string', { timeout: 10000 },
   })
 })
 
+test('createServer: .reload() excludes source maps from CSS injection batches', { timeout: 10000 }, async (t) => {
+  const bs = await createServer(makeOpts({ reloadDebounce: 0 }))
+  const ws = await withTimeout('connect ready websocket', connectReadyWs(bs.url))
+  t.after(async () => {
+    await closeWs(ws)
+    await bs.exit()
+  })
+
+  const message = nextNonOptionsMessage(ws)
+  bs.reload(['styles.css', 'styles.css.map'])
+
+  assert.deepStrictEqual(await withTimeout('receive CSS reload without source map', message), {
+    type: 'file-reload',
+    file: {
+      ext: 'css',
+      path: 'styles.css',
+      basename: 'styles.css',
+      event: 'change',
+      type: 'inject',
+    },
+  })
+})
+
 test('createServer: .reload() honors reloadDelay', { timeout: 10000 }, async (t) => {
   const bs = await createServer(makeOpts({ reloadDelay: 150, reloadDebounce: 0 }))
   const ws = await withTimeout('connect ready websocket', connectReadyWs(bs.url))

@@ -18,7 +18,7 @@ test('parseOptions: defaults', () => {
   assert.deepStrictEqual(opts.scrollElements, [])
   assert.deepStrictEqual(opts.scrollElementMapping, [])
   assert.strictEqual(opts.scrollProportionally, true)
-  assert.deepStrictEqual(opts.injectFileTypes, ['css', 'png', 'jpg', 'jpeg', 'svg', 'gif', 'webp', 'map'])
+  assert.deepStrictEqual(opts.injectFileTypes, ['css', 'png', 'jpg', 'jpeg', 'svg', 'gif', 'webp'])
   assert.strictEqual(opts.tagNames['css'], 'link')
   assert.strictEqual(opts.tagNames['png'], 'img')
   assert.deepStrictEqual(opts.watchEvents, ['change'])

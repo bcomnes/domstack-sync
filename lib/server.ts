@@ -20,7 +20,7 @@ import { createThrottleServer } from './throttle-server.ts'
 import { getLocalIp } from './ip.ts'
 import { createLogger, logAccessUrls } from './logger.ts'
 import { createUiServer } from './ui/server.ts'
-import { getReloadDecision } from './reload-decision.ts'
+import { filterReloadFiles, getReloadDecision } from './reload-decision.ts'
 import { applyGhostModePatch, parseOptions } from './options.ts'
 import { BsPluginManager } from './plugins.ts'
 import {
@@ -336,11 +336,15 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
 
     watcher.on('changes', (batch: WatchEvent[]) => {
       if (paused) return
-      for (const evt of batch) {
+      const reloadPaths = new Set(filterReloadFiles(batch.map(evt => evt.path)))
+      const reloadBatch = batch.filter(evt => reloadPaths.has(evt.path))
+      if (reloadBatch.length === 0) return
+
+      for (const evt of reloadBatch) {
         logFileEvent(evt)
         events.emit('file:change', evt)
       }
-      scheduleFileBroadcast(batch.map(evt => evt.path))
+      scheduleFileBroadcast(reloadBatch.map(evt => evt.path))
     })
   }
 
@@ -420,7 +424,10 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
   }
 
   function scheduleReloadArg (arg: ReloadArg): void {
-    const files = getReloadFiles(arg)
+    const requestedFiles = getReloadFiles(arg)
+    const files = requestedFiles ? filterReloadFiles(requestedFiles) : undefined
+    if (requestedFiles && files?.length === 0) return
+
     if (files) {
       for (const file of files) {
         const evt = { path: file, event: 'change', namespace: 'core', timestamp: Date.now() } satisfies WatchEvent

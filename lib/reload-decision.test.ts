@@ -1,6 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert'
-import { getReloadDecision } from './reload-decision.ts'
+import { filterReloadFiles, getReloadDecision } from './reload-decision.ts'
+
+test('filterReloadFiles: removes source maps before reload decisions', () => {
+  assert.deepStrictEqual(
+    filterReloadFiles(['style.css', 'style.css.map', 'nested/app.JS.MAP']),
+    ['style.css']
+  )
+})
 
 test('getReloadDecision: injects all-css batches', () => {
   assert.deepStrictEqual(getReloadDecision(['one.css', 'nested/two.CSS'], true, ['css']), {

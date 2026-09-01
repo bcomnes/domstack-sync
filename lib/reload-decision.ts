@@ -5,6 +5,11 @@ export type ReloadDecision =
   | { type: 'reload' }
   | { type: 'file-reload'; files: FileReloadInfo[] }
 
+/** Source maps are debugging metadata and never require a browser update. */
+export function filterReloadFiles (files: string[]): string[] {
+  return files.filter(file => extname(file).toLowerCase() !== '.map')
+}
+
 export function getReloadDecision (
   files: string[] | undefined,
   injectChanges: boolean,

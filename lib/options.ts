@@ -62,7 +62,7 @@ export const ghostModeSchema = {
   additionalProperties: false,
 } as const satisfies JSONSchema
 
-export const defaultInjectFileTypes = ['css', 'png', 'jpg', 'jpeg', 'svg', 'gif', 'webp', 'map'] as const
+export const defaultInjectFileTypes = ['css', 'png', 'jpg', 'jpeg', 'svg', 'gif', 'webp'] as const
 
 export const defaultTagNames: Record<string, string> = {
   less: 'link',
