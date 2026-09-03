@@ -39,7 +39,17 @@ export const remoteDebugPageTemplate: PageTemplate = context => {
             <form class="form-grid" method="post" action="/actions/remote-debug/overlay-grid/update" hx-post="/actions/remote-debug/overlay-grid/update" hx-target="#main" hx-swap="innerHTML">
               <input type="hidden" name="returnTo" value="/remote-debug">
               <label class="field"><span>Grid Size</span><input name="size" value="${remoteDebug.overlayGrid.size}"></label>
-              <label class="field"><span>Grid Colour</span><input name="color" value="${remoteDebug.overlayGrid.color}"></label>
+              <label class="field">
+                <span>Grid Color</span>
+                <input type="color" name="color" list="grid-color-presets" value="${remoteDebug.overlayGrid.color}">
+                <datalist id="grid-color-presets">
+                  <option value="#38bdf8" label="Sky"></option>
+                  <option value="#a78bfa" label="Violet"></option>
+                  <option value="#f472b6" label="Pink"></option>
+                  <option value="#facc15" label="Yellow"></option>
+                  <option value="#34d399" label="Emerald"></option>
+                </datalist>
+              </label>
               <label class="field"><span>CSS Selector</span><input name="selector" value="${remoteDebug.overlayGrid.selector}"></label>
               <label class="field"><span>Offset Top</span><input name="offsetY" value="${remoteDebug.overlayGrid.offsetY}"></label>
               <label class="field"><span>Offset Left</span><input name="offsetX" value="${remoteDebug.overlayGrid.offsetX}"></label>

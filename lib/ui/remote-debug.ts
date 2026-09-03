@@ -30,7 +30,7 @@ export const defaultOverlayGrid: OverlayGridState = {
   offsetX: '0',
   size: '16px',
   selector: 'body',
-  color: 'rgba(0, 0, 0, .2)',
+  color: '#38bdf8',
   horizontal: true,
   vertical: true,
 }
@@ -55,6 +55,7 @@ export function cloneRemoteDebug (state: RemoteDebugState): RemoteDebugState {
 
 export function getOverlayGridCss (opts: OverlayGridState): string {
   const selectorPosition = `${opts.selector} {position:relative;}`
+  const gridColor = `color-mix(in srgb, ${opts.color} 40%, transparent)`
   const horizontal = opts.horizontal
     ? `${opts.selector}:after {
   position: absolute;
@@ -69,7 +70,7 @@ export function getOverlayGridCss (opts: OverlayGridState): string {
   bottom: 0;
   left: ${opts.offsetX};
   background-color: transparent;
-  background-image: linear-gradient(${opts.color} 1px, transparent 1px);
+  background-image: linear-gradient(${gridColor} 1px, transparent 1px);
   background-size: 100% ${opts.size};
 }`
     : ''
@@ -87,7 +88,7 @@ export function getOverlayGridCss (opts: OverlayGridState): string {
   bottom: 0;
   left: ${opts.offsetX};
   background-color: transparent;
-  background-image: linear-gradient(90deg, ${opts.color} 1px, transparent 1px);
+  background-image: linear-gradient(90deg, ${gridColor} 1px, transparent 1px);
   background-size: ${opts.size} 100%;
 }`
     : ''

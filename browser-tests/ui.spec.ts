@@ -80,6 +80,9 @@ test('remote debug UI injects client CSS and overlay grid DOM nodes', async ({ c
 
   await ui.locator('.option-item').filter({ hasText: 'Grid overlay' }).locator('label.toggle').click()
   await expect(page.locator('#__bs_overlay-grid-styles__')).toBeAttached()
+  await expect(ui.getByLabel('Grid Color')).toHaveAttribute('type', 'color')
+  await expect(ui.getByLabel('Grid Color')).toHaveValue('#38bdf8')
+  await expect(ui.locator('#grid-color-presets option')).toHaveCount(5)
 })
 
 test('network throttle UI creates and removes a throttle server entry', async ({ page, startServer }) => {
