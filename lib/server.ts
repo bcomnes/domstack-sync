@@ -40,6 +40,7 @@ import {
   type StreamOptions,
 } from './reload-api.ts'
 import { normalizeStaticPrefix, renderDirectoryList } from './static-serving.ts'
+import { appendSessionToken, createSessionToken, isAuthorizedWebSocketRequest } from './session-token.ts'
 import type { BsOptions, BsOptionsInput } from './options.ts'
 import type { WatchEvent } from './watcher.ts'
 import type { ClientRuntimeOptions, ClientRuntimeOptionsPatch } from './protocol.ts'
@@ -52,7 +53,10 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
 export interface BsInstance {
   url: string
+  socketUrl: string
+  snippet: string
   uiUrl: string | null
+  uiSocketUrl: string | null
   localIp: string
   port: number
   uiPort: number | null
@@ -114,6 +118,7 @@ async function startServer (
   const port = await findFreePort(opts.port)
   const localIp = getLocalIp()
   const events = new EventEmitter()
+  const sessionToken = createSessionToken()
 
   const fastify = Fastify(opts.logLevel === 'debug'
     ? { loggerInstance: logger.child({ component: 'fastify' }) }
@@ -155,7 +160,7 @@ async function startServer (
   }
 
   const pkg = JSON.parse(readFileSync(resolve(__dirname, '../package.json'), 'utf8')) as { version: string }
-  const snippet = buildSnippet({ port, version: pkg.version })
+  const snippet = buildSnippet({ port, version: pkg.version, token: sessionToken })
   registerInjector(fastify, snippet, {
     enabled: opts.snippet,
     whitelist: opts.snippetOptions.whitelist,
@@ -340,8 +345,12 @@ async function startServer (
   sockets.on('client:update', (info) => events.emit('client:update', info))
 
   fastify.server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-    if ((req.url ?? '').startsWith('/__bs')) {
+    // Browser clients send Origin and must prove they received the injected
+    // session token. Origin-less clients retain the legacy automation API.
+    if (!req.headers.origin || isAuthorizedWebSocketRequest(req.url, '/__bs', sessionToken)) {
       sockets.handleUpgrade(req, socket, head)
+    } else {
+      socket.destroy()
     }
   })
 
@@ -382,12 +391,14 @@ async function startServer (
   await fastify.listen({ port, host: '0.0.0.0' })
 
   const url = `http://localhost:${port}`
+  const socketUrl = appendSessionToken(`ws://localhost:${port}/__bs`, sessionToken)
   const externalUrl = `http://${localIp}:${port}`
   logger.info({ url }, `Server started at ${url}`)
 
   // UI panel
   let uiInstance: Awaited<ReturnType<typeof createUiServer>> | null = null
   let uiUrl: string | null = null
+  let uiSocketUrl: string | null = null
   let uiExternalUrl: string | null = null
   const throttleServers = new Map<number, ReturnType<typeof createThrottleServer>>()
 
@@ -425,7 +436,9 @@ async function startServer (
       getUserPlugins: () => pluginManager.getUserPlugins(),
       configureUserPlugin,
       handleUiEvent: (event) => pluginManager.handleUiEvent(event),
+      sessionToken,
     })
+    uiSocketUrl = uiInstance.uiSocketUrl
     startupCleanupTasks.push(() => uiInstance?.exit())
   }
 
@@ -717,7 +730,10 @@ async function startServer (
 
   Object.assign(instance, {
     url,
+    socketUrl,
+    snippet,
     uiUrl: uiInstance?.uiUrl ?? null,
+    uiSocketUrl,
     localIp,
     port,
     uiPort: uiInstance?.uiPort ?? null,

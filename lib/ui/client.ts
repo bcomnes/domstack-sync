@@ -11,6 +11,7 @@ declare global {
 window.htmx = htmx
 
 const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+const sessionToken = new URL(import.meta.url).searchParams.get('token') ?? ''
 const statusEl = document.getElementById('connection-status')
 let reconnectDelay = 250
 let socket: WebSocket | null = null
@@ -19,7 +20,7 @@ connect()
 
 function connect (): void {
   setStatus('connecting')
-  socket = new WebSocket(`${protocol}//${location.host}/ws`)
+  socket = new WebSocket(`${protocol}//${location.host}/ws?token=${encodeURIComponent(sessionToken)}`)
 
   socket.addEventListener('open', () => {
     reconnectDelay = 250

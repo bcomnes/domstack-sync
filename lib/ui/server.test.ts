@@ -42,6 +42,7 @@ function defaultUiCallbacks (): {
   setLatency: () => void
   createThrottleServer: (target: NetworkThrottleTarget, port: string) => Promise<NetworkThrottleServerInfo>
   destroyThrottleServer: () => Promise<void>
+  sessionToken: string
 } {
   return {
     sendUiElementAdd: () => {},
@@ -55,6 +56,7 @@ function defaultUiCallbacks (): {
       speed: target,
     }),
     destroyThrottleServer: async () => {},
+    sessionToken: 'test-session-token',
   }
 }
 
@@ -237,7 +239,7 @@ test('createUiServer: renders fragtml pages with HTMX actions', { timeout: 10000
   assert.ok(html.includes('hx-post="/actions/options"'))
   assert.ok(html.includes('hx-trigger="bs:state-update from:body"'))
   assert.ok(html.includes('<main'))
-  assert.ok(html.includes('<script type="module" src="/app.js"></script>'))
+  assert.ok(html.includes('<script type="module" src="/app.js?token=test-session-token"></script>'))
   assert.ok(!html.includes('id="app"'))
 
   const js = await fetch(`http://127.0.0.1:${uiPort}/app.js`)

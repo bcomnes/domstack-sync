@@ -65,7 +65,7 @@ let suppressClickUntil = 0
 let lastScrollSentAt = 0
 
 const conn = openReconnecting({
-  url: `${socketOrigin.protocol}//${socketOrigin.host}/__bs`,
+  url: `${socketOrigin.protocol}//${socketOrigin.host}/__bs?token=${encodeURIComponent(socketOrigin.token)}`,
   onopen: () => {
     log.debug('Connected')
     sendClientInfo()
@@ -139,7 +139,7 @@ const conn = openReconnecting({
   },
 })
 
-function getSocketOrigin (): { protocol: 'ws:' | 'wss'; host: string } {
+function getSocketOrigin (): { protocol: 'ws:' | 'wss'; host: string; token: string } {
   const script = document.currentScript
 
   if (script instanceof HTMLScriptElement && script.src) {
@@ -148,6 +148,7 @@ function getSocketOrigin (): { protocol: 'ws:' | 'wss'; host: string } {
       return {
         protocol: scriptUrl.protocol === 'https:' ? 'wss:' : 'ws:',
         host: scriptUrl.host,
+        token: scriptUrl.searchParams.get('token') ?? '',
       }
     } catch {
       // Fall through to the page URL if the script URL cannot be parsed.
@@ -157,6 +158,7 @@ function getSocketOrigin (): { protocol: 'ws:' | 'wss'; host: string } {
   return {
     protocol: location.protocol === 'https:' ? 'wss:' : 'ws:',
     host: location.host,
+    token: '',
   }
 }
 

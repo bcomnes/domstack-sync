@@ -60,6 +60,7 @@ import {
   removeUndefined,
 } from './forms.ts'
 import type { FormBody } from './forms.ts'
+import { appendSessionToken, isAuthorizedWebSocketRequest } from '../session-token.ts'
 import {
   clearActionSchema,
   emptyBodySchema,
@@ -106,10 +107,12 @@ export interface UiServerOptions {
   getUserPlugins?: () => UserPluginState[]
   configureUserPlugin?: (plugin: UserPluginState) => void
   handleUiEvent?: (event: PluginUiEvent) => void
+  sessionToken: string
 }
 
 export interface UiInstance {
   uiUrl: string
+  uiSocketUrl: string
   uiPort: number
   exit: () => Promise<void>
 }
@@ -123,7 +126,7 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
   const layout: UiLayout = {
     contentType: 'text/html; charset=utf-8',
     render: (children, context, renderOptions) => {
-      return layoutTemplate({ context, children, fragmentId: renderOptions.fragmentId })
+      return layoutTemplate({ context, children, fragmentId: renderOptions.fragmentId, sessionToken: opts.sessionToken })
     },
   }
 
@@ -354,8 +357,12 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
   addEventListeners()
 
   fastify.server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-    if (req.url === '/ws') {
+    // Browsers must present the token embedded in this UI's module script.
+    // Keep origin-less WebSocket clients compatible with the programmatic API.
+    if (!req.headers.origin || isAuthorizedWebSocketRequest(req.url, '/ws', opts.sessionToken)) {
       wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
+    } else {
+      socket.destroy()
     }
   })
 
@@ -377,6 +384,7 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
 
   return {
     uiUrl: opts.uiUrl,
+    uiSocketUrl: appendSessionToken(opts.uiUrl.replace(/^http/, 'ws') + '/ws', opts.sessionToken),
     uiPort: opts.uiPort,
     async exit () {
       removeEventListeners()

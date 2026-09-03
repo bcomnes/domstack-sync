@@ -7,9 +7,10 @@ export interface LayoutOptions {
   context: UiTemplateContext
   children: HtmlRenderable
   fragmentId?: typeof MAIN_FRAGMENT | undefined
+  sessionToken: string
 }
 
-export function layoutTemplate ({ context, children, fragmentId }: LayoutOptions): HtmlResult {
+export function layoutTemplate ({ context, children, fragmentId, sessionToken }: LayoutOptions): HtmlResult {
   const html = createHtml({ fragmentId })
 
   return html`
@@ -35,7 +36,7 @@ export function layoutTemplate ({ context, children, fragmentId }: LayoutOptions
         ${children}
         ${html.fragment.end}
       </main>
-      <script type="module" src="/app.js"></script>
+      <script type="module" src="/app.js?token=${sessionToken}"></script>
     </body>
     </html>
   `

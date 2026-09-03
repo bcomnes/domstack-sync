@@ -8,3 +8,9 @@ test('buildSnippet: snippet mode loads the client from the sync server port on t
   assert.ok(snippet.includes("location.hostname + ':3000/__bs/client.js?v=1.2.3'"), snippet)
   assert.ok(!snippet.includes("script.src = '/__bs/client.js"), snippet)
 })
+
+test('buildSnippet: includes the session token in the client script URL', () => {
+  const snippet = buildSnippet({ port: 3000, version: '1.2.3', token: 'session-token' })
+
+  assert.ok(snippet.includes('/__bs/client.js?v=1.2.3&token=session-token'), snippet)
+})

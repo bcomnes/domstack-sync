@@ -147,7 +147,7 @@ function expectNoNonOptionsMessage (ws: TestWebSocket, ms = 300): Promise<void> 
   })
 }
 
-function closeWs (ws: TestWebSocket): Promise<void> {
+function closeWs (ws: WebSocket): Promise<void> {
   return new Promise((resolve) => {
     if (ws.readyState === WebSocket.CLOSED) { resolve(); return }
     ws.once('close', resolve)
@@ -185,11 +185,36 @@ test('createServer: starts and returns URLs', async (t) => {
   t.after(() => bs.exit())
 
   assert.ok(bs.url.startsWith('http://localhost:'))
+  assert.ok(bs.socketUrl.startsWith('ws://localhost:'))
+  assert.ok(bs.socketUrl.includes('token='))
   assert.ok(typeof bs.port === 'number')
   assert.ok(bs.port > 0)
   assert.strictEqual(bs.uiUrl, null)
   assert.strictEqual(bs.uiPort, null)
   assert.ok(typeof bs.localIp === 'string')
+})
+
+test('createServer: browser WebSockets require the injected session token', async (t) => {
+  const bs = await createServer(makeOpts())
+  t.after(() => bs.exit())
+
+  await new Promise<void>((resolve, reject) => {
+    const ws = new WebSocket(bs.url.replace(/^http:/, 'ws:') + '/__bs', {
+      origin: 'http://untrusted.example',
+    })
+    ws.once('open', () => {
+      ws.terminate()
+      reject(new Error('WebSocket opened without the session token'))
+    })
+    ws.once('error', () => resolve())
+  })
+
+  const authorized = await new Promise<WebSocket>((resolve, reject) => {
+    const ws = new WebSocket(bs.socketUrl, { origin: 'http://dev.example' })
+    ws.once('open', () => resolve(ws))
+    ws.once('error', reject)
+  })
+  await closeWs(authorized)
 })
 
 test('createServer: rolls back allocated resources when UI startup fails', async (t) => {

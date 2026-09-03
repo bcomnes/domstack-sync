@@ -1,7 +1,6 @@
 import { expect, test } from './support.ts'
 import { createServer as createHttpServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { buildSnippet } from '../lib/snippet.ts'
 
 test('injects and connects the browser client on a static HTML page', async ({ page, startServer }) => {
   const bs = await startServer()
@@ -20,7 +19,7 @@ test('snippet mode connects when pasted into a page served from another origin',
   const bs = await startServer({ server: false })
   const external = createHttpServer((_req, res) => {
     res.setHeader('content-type', 'text/html; charset=utf-8')
-    res.end(`<!doctype html><title>External snippet fixture</title><h1>External snippet fixture</h1>${buildSnippet({ port: bs.port })}`)
+    res.end(`<!doctype html><title>External snippet fixture</title><h1>External snippet fixture</h1>${bs.snippet}`)
   })
 
   await listen(external)
