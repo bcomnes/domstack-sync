@@ -77,6 +77,10 @@ const options = {
     short: 'v',
     help: 'Show version',
   },
+  force: {
+    type: 'boolean',
+    help: 'Overwrite an existing config when running init',
+  },
 } as const
 
 const { values, positionals } = parseArgs({
@@ -147,6 +151,10 @@ export default {
 }
 `
   const dest = resolve(process.cwd(), 'domstack-sync.config.mjs')
+  if (existsSync(dest) && !values.force) {
+    process.stderr.write(`Config already exists: ${dest}\nUse --force to overwrite it.\n`)
+    process.exit(1)
+  }
   writeFileSync(dest, config)
   process.stdout.write(`Created ${dest}\n`)
   process.exit(0)

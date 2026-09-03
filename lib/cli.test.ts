@@ -171,6 +171,27 @@ test('cli: init creates domstack-sync.config.mjs', async () => {
   }
 })
 
+test('cli: init preserves an existing config unless --force is passed', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sync-cli-existing-'))
+  const configPath = join(dir, 'domstack-sync.config.mjs')
+  const existingConfig = 'export default { port: 4321 }\n'
+  try {
+    writeFileSync(configPath, existingConfig)
+
+    const refused = await run(['init'], dir)
+    assert.strictEqual(refused.code, 1)
+    assert.match(refused.stderr, /Config already exists/)
+    assert.match(refused.stderr, /--force/)
+    assert.strictEqual(readFileSync(configPath, 'utf8'), existingConfig)
+
+    const forced = await run(['init', '--force'], dir)
+    assert.strictEqual(forced.code, 0, forced.stderr)
+    assert.notStrictEqual(readFileSync(configPath, 'utf8'), existingConfig)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('cli: init config is loaded by startup', { timeout: 10000 }, async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'sync-cli-init-start-'))
   t.after(() => rmSync(dir, { recursive: true, force: true }))
