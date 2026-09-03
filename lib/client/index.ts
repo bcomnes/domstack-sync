@@ -42,7 +42,7 @@ let runtimeOptions: ClientRuntimeOptions = {
   notify: true,
   codeSync: true,
   injectChanges: true,
-  injectFileTypes: ['css', 'png', 'jpg', 'jpeg', 'svg', 'gif', 'webp', 'map'],
+  injectFileTypes: ['css', 'png', 'jpg', 'jpeg', 'svg', 'gif', 'webp'],
   tagNames: {
     less: 'link',
     scss: 'link',

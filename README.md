@@ -142,7 +142,7 @@ logAccessUrls(standaloneLogger, {
 | `notify` | `boolean` | `true` | Show notification overlay in connected browsers |
 | `cors` | `boolean` | `false` | Add CORS headers to all responses |
 | `injectChanges` | `boolean` | `true` | Inject matching file changes instead of full reload |
-| `injectFileTypes` | `string[]` | `['css', 'png', 'jpg', 'jpeg', 'svg', 'gif', 'webp', 'map']` | Extensions eligible for file injection |
+| `injectFileTypes` | `string[]` | `['css', 'png', 'jpg', 'jpeg', 'svg', 'gif', 'webp']` | Extensions eligible for file injection |
 | `tagNames` | `Record<string, string>` | built-in asset tag map | Element tag names used for non-CSS file injection |
 | `codeSync` | `boolean` | `true` | Broadcast reload and file-injection messages |
 | `reloadDebounce` | `number` | `500` | Milliseconds to debounce file-change reloads |
