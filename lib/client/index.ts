@@ -210,7 +210,7 @@ document.addEventListener('click', (e) => {
 }, { capture: true })
 
 // Ghost mode — text input sync
-document.addEventListener('keyup', (e) => {
+document.addEventListener('input', (e) => {
   if (!runtimeOptions.ghostMode.forms.inputs) return
   const el = e.target
   if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return
