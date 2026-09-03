@@ -299,7 +299,7 @@ test('BsSockets: broadcast excludes sender', async () => {
       ws2.once('message', () => { clearTimeout(timer); resolve(true) })
     })
 
-    const ghostMsg = { type: 'scroll', position: { raw: { x: 0, y: 100 }, proportional: 0.5 }, tagName: 'document', index: 0, mappingIndex: -1, pathname: '/' }
+    const ghostMsg = { type: 'scroll', position: { raw: { x: 0, y: 100 }, proportional: { x: 0, y: 0.5 } }, tagName: 'document', index: 0, mappingIndex: -1, pathname: '/' }
     ws2.send(JSON.stringify(ghostMsg))
 
     const [m1, ws2Got] = await Promise.all([msg1, ws2Received])
@@ -331,7 +331,7 @@ test('BsSockets: relay broadcasts path-scoped ghost messages for client-side fil
     // Browser clients compare the message pathname against their live
     // window.location.pathname so SPA/history changes cannot stale here.
     const msg2 = new Promise<string>((resolve) => ws2.once('message', (d) => resolve(d.toString())))
-    const ghostMsg = { type: 'scroll', position: { raw: { x: 0, y: 0 }, proportional: 0 }, tagName: 'document', index: 0, mappingIndex: -1, pathname: '/page-a' }
+    const ghostMsg = { type: 'scroll', position: { raw: { x: 0, y: 0 }, proportional: { x: 0, y: 0 } }, tagName: 'document', index: 0, mappingIndex: -1, pathname: '/page-a' }
     ws1.send(JSON.stringify(ghostMsg))
 
     const m2 = await msg2
@@ -364,7 +364,7 @@ test('BsSockets: relays scroll:element ghost messages', async () => {
     const msg2 = new Promise<string>((resolve) => ws2.once('message', (d) => resolve(d.toString())))
     const scrollElementMsg = {
       type: 'scroll:element',
-      position: { raw: { x: 0, y: 50 }, proportional: 0.25 },
+      position: { raw: { x: 0, y: 50 }, proportional: { x: 0, y: 0.25 } },
       tagName: 'DIV',
       index: 0,
       mappingIndex: -1,
@@ -493,7 +493,7 @@ test('BsSockets: client-info initializes pathname before first ghost event', asy
     ws2.send(JSON.stringify({ type: 'client-info', pathname: '/page-a' }))
 
     const msg2 = new Promise<string>((resolve) => ws2.once('message', (d) => resolve(d.toString())))
-    const ghostMsg = { type: 'scroll', position: { raw: { x: 0, y: 50 }, proportional: 0.25 }, tagName: 'document', index: 0, mappingIndex: -1, pathname: '/page-a' }
+    const ghostMsg = { type: 'scroll', position: { raw: { x: 0, y: 50 }, proportional: { x: 0, y: 0.25 } }, tagName: 'document', index: 0, mappingIndex: -1, pathname: '/page-a' }
     ws1.send(JSON.stringify(ghostMsg))
 
     const m2 = await msg2

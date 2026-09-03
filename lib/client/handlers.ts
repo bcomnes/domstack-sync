@@ -103,7 +103,7 @@ function getDocumentScrollPosition (): ScrollPosition {
   }
   return {
     raw,
-    proportional: getScrollPercentage(getDocumentScrollSpace(), raw).y,
+    proportional: getScrollPercentage(getDocumentScrollSpace(), raw),
   }
 }
 
@@ -114,14 +114,19 @@ function getElementScrollPosition (element: HTMLElement): ScrollPosition {
   }
   return {
     raw,
-    proportional: getScrollPercentage({ x: element.scrollWidth, y: element.scrollHeight }, raw).y,
+    proportional: getScrollPercentage({
+      x: element.scrollWidth - element.clientWidth,
+      y: element.scrollHeight - element.clientHeight,
+    }, raw),
   }
 }
 
 function getDocumentScrollSpace (): { x: number; y: number } {
+  const root = document.documentElement
+  const body = document.body
   return {
-    x: document.body.scrollHeight - document.documentElement.clientWidth,
-    y: document.body.scrollHeight - document.documentElement.clientHeight,
+    x: Math.max(root.scrollWidth, body.scrollWidth) - root.clientWidth,
+    y: Math.max(root.scrollHeight, body.scrollHeight) - root.clientHeight,
   }
 }
 
@@ -135,8 +140,8 @@ function getScrollPercentage (scrollSpace: { x: number; y: number }, scrollPosit
 export function handleScroll (event: ScrollMessage | ScrollElementMessage, opts: ScrollApplyOptions): void {
   if (event.tagName === 'document') {
     const scrollSpace = getDocumentScrollSpace()
-    const nextX = opts.scrollProportionally ? scrollSpace.x * event.position.proportional : event.position.raw.x
-    const nextY = opts.scrollProportionally ? scrollSpace.y * event.position.proportional : event.position.raw.y
+    const nextX = opts.scrollProportionally ? scrollSpace.x * event.position.proportional.x : event.position.raw.x
+    const nextY = opts.scrollProportionally ? scrollSpace.y * event.position.proportional.y : event.position.raw.y
     if (isNear(window.pageXOffset, nextX) && isNear(window.pageYOffset, nextY)) return
     window.scrollTo(nextX, nextY)
     return
@@ -160,8 +165,12 @@ export function handleScroll (event: ScrollMessage | ScrollElementMessage, opts:
 }
 
 function scrollElement (element: HTMLElement, event: ScrollMessage | ScrollElementMessage, scrollProportionally: boolean): void {
-  const nextX = scrollProportionally ? element.scrollWidth * event.position.proportional : event.position.raw.x
-  const nextY = scrollProportionally ? element.scrollHeight * event.position.proportional : event.position.raw.y
+  const nextX = scrollProportionally
+    ? (element.scrollWidth - element.clientWidth) * event.position.proportional.x
+    : event.position.raw.x
+  const nextY = scrollProportionally
+    ? (element.scrollHeight - element.clientHeight) * event.position.proportional.y
+    : event.position.raw.y
   if (isNear(element.scrollLeft, nextX) && isNear(element.scrollTop, nextY)) return
   element.scrollTo(nextX, nextY)
 }

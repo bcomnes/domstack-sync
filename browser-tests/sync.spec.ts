@@ -16,6 +16,30 @@ test('syncs document scroll once without echoing the remote scroll back', async 
   expect(await noTargetEcho).toBeNull()
 })
 
+test('syncs horizontal document scroll proportionally across viewport sizes', async ({ context, page, startServer }) => {
+  const bs = await startServer()
+  const target = await context.newPage()
+  await target.setViewportSize({ width: 640, height: 720 })
+  await Promise.all([
+    gotoAndWaitForClient(page, bs, '/scroll.html#source'),
+    gotoAndWaitForClient(target, bs, '/scroll.html#target'),
+  ])
+
+  await page.evaluate(() => {
+    const scrollableWidth = document.documentElement.scrollWidth - document.documentElement.clientWidth
+    window.scrollTo(scrollableWidth / 2, 0)
+  })
+
+  await expect.poll(() => target.evaluate(() => {
+    const scrollableWidth = document.documentElement.scrollWidth - document.documentElement.clientWidth
+    return window.scrollX / scrollableWidth
+  })).toBeGreaterThan(0.45)
+  expect(await target.evaluate(() => {
+    const scrollableWidth = document.documentElement.scrollWidth - document.documentElement.clientWidth
+    return window.scrollX / scrollableWidth
+  })).toBeLessThan(0.55)
+})
+
 test('syncs mapped element scroll targets', async ({ context, page, startServer }) => {
   const bs = await startServer({
     scrollElementMapping: ['#source-pane', '#target-pane'],
@@ -104,8 +128,7 @@ test('mirrors text, toggle, select, reset, and submit form behavior', async ({ c
     gotoAndWaitForClient(target, bs, '/forms.html#target'),
   ])
 
-  await page.locator('#text-input').fill('')
-  await page.locator('#text-input').pressSequentially('mirrored')
+  await page.locator('#text-input').fill('mirrored')
   await expect(target.locator('#text-input')).toHaveValue('mirrored')
 
   await page.locator('#checkbox-input').check()

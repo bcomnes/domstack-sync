@@ -48,7 +48,7 @@ export interface ElementData {
 
 export interface ScrollPosition {
   raw: { x: number; y: number }
-  proportional: number
+  proportional: { x: number; y: number }
 }
 
 export interface ScrollMessage extends ElementData {
