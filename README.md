@@ -10,6 +10,8 @@ A modern, dependency-minimized live-reload dev server. A love letter to browser-
 
 ## Install
 
+Node.js 22.18 or newer is required.
+
 ```sh
 npm install @domstack/sync
 ```
