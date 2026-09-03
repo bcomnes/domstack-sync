@@ -316,26 +316,42 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
     })
   })
 
-  opts.events.on('client:connect', (info: BsClientInfo) => {
+  const onClientConnect = (info: BsClientInfo): void => {
     connections = [...connections, info]
     broadcastUpdate({ connections })
-  })
+  }
 
-  opts.events.on('client:disconnect', (id: string) => {
+  const onClientDisconnect = (id: string): void => {
     connections = connections.filter(c => c.id !== id)
     broadcastUpdate({ connections })
-  })
+  }
 
-  opts.events.on('client:update', (info: BsClientInfo) => {
+  const onClientUpdate = (info: BsClientInfo): void => {
     connections = connections.map(c => c.id === info.id ? info : c)
     addHistoryPath(opts.mode === 'snippet' ? (info.href ?? info.path ?? info.pathname) : (info.path || info.pathname))
     broadcastUpdate({ connections })
-  })
+  }
 
-  opts.events.on('plugins:update', (plugins?: UserPluginState[]) => {
+  const onPluginsUpdate = (plugins?: UserPluginState[]): void => {
     userPlugins = plugins ? cloneUserPlugins(plugins) : cloneUserPlugins(opts.getUserPlugins?.() ?? userPlugins)
     broadcastUpdate({ plugins: cloneUserPlugins(userPlugins) })
-  })
+  }
+
+  function addEventListeners (): void {
+    opts.events.on('client:connect', onClientConnect)
+    opts.events.on('client:disconnect', onClientDisconnect)
+    opts.events.on('client:update', onClientUpdate)
+    opts.events.on('plugins:update', onPluginsUpdate)
+  }
+
+  function removeEventListeners (): void {
+    opts.events.off('client:connect', onClientConnect)
+    opts.events.off('client:disconnect', onClientDisconnect)
+    opts.events.off('client:update', onClientUpdate)
+    opts.events.off('plugins:update', onPluginsUpdate)
+  }
+
+  addEventListeners()
 
   fastify.server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     if (req.url === '/ws') {
@@ -343,12 +359,27 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
     }
   })
 
-  await fastify.listen({ port: opts.uiPort, host: '0.0.0.0' })
+  try {
+    await fastify.listen({ port: opts.uiPort, host: '0.0.0.0' })
+  } catch (startupError) {
+    removeEventListeners()
+    try {
+      await fastify.close()
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [startupError, cleanupError],
+        'Failed to start the domstack-sync UI and clean up its server',
+        { cause: startupError }
+      )
+    }
+    throw startupError
+  }
 
   return {
     uiUrl: opts.uiUrl,
     uiPort: opts.uiPort,
     async exit () {
+      removeEventListeners()
       for (const client of wss.clients) {
         client.terminate()
       }

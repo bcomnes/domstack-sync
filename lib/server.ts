@@ -86,6 +86,29 @@ interface RuntimeMiddlewareOptions extends PluginMiddlewareOptions {
 }
 
 export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): Promise<BsInstance> {
+  const startupCleanupTasks: Array<() => void | Promise<void>> = []
+  try {
+    const instance = await startServer(rawOpts, startupCleanupTasks)
+    startupCleanupTasks.length = 0
+    return instance
+  } catch (startupError) {
+    try {
+      await runCleanupTasks(startupCleanupTasks)
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [startupError, cleanupError],
+        'Failed to start domstack-sync and clean up allocated resources',
+        { cause: startupError }
+      )
+    }
+    throw startupError
+  }
+}
+
+async function startServer (
+  rawOpts: BsOptionsInput | BsOptions,
+  startupCleanupTasks: Array<() => void | Promise<void>>
+): Promise<BsInstance> {
   const opts = parseOptions(rawOpts)
   const logger = opts.logger ?? createLogger(opts.logLevel)
   const port = await findFreePort(opts.port)
@@ -103,6 +126,12 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
   let servedFileId = 0
   let configuringPlugin = false
   const instance = {} as BsInstance
+  startupCleanupTasks.push(async () => {
+    fastify.server.closeIdleConnections?.()
+    fastify.server.closeAllConnections?.()
+    await fastify.close()
+  })
+  startupCleanupTasks.push(() => runCleanupTasks(cleanupTasks))
 
   await fastify.register(fastifyMiddie, { hook: 'onRequest' })
 
@@ -267,6 +296,7 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
     getRuntimeOptions,
     getPluginClientEvents: () => pluginManager.getClientEvents(),
   })
+  startupCleanupTasks.push(() => sockets.close())
   const pluginApi = createPluginApi()
   await pluginManager.init(pluginApi)
   events.on('plugins:configure', (data: unknown) => {
@@ -333,6 +363,7 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
       watchEvents: opts.watchEvents,
       fnContext: instance,
     })
+    startupCleanupTasks.push(() => watcher?.close())
 
     watcher.on('changes', (batch: WatchEvent[]) => {
       if (paused) return
@@ -395,6 +426,7 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
       configureUserPlugin,
       handleUiEvent: (event) => pluginManager.handleUiEvent(event),
     })
+    startupCleanupTasks.push(() => uiInstance?.exit())
   }
 
   logAccessUrls(logger, { local: url, external: externalUrl, ui: uiUrl, uiExternal: uiExternalUrl })
@@ -716,6 +748,20 @@ export async function createServer (rawOpts: BsOptionsInput | BsOptions = {}): P
     removeMiddleware: removeRuntimeMiddleware,
   } satisfies BsInstance)
   return instance
+}
+
+async function runCleanupTasks (tasks: Array<() => void | Promise<void>>): Promise<void> {
+  const errors: unknown[] = []
+  for (const task of tasks.splice(0).reverse()) {
+    try {
+      await task()
+    } catch (error) {
+      errors.push(error)
+    }
+  }
+  if (errors.length > 0) {
+    throw new AggregateError(errors, 'One or more cleanup tasks failed')
+  }
 }
 
 async function findFreeThrottlePort (start: number): Promise<number> {

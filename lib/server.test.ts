@@ -5,6 +5,8 @@ import { createServer } from './server.ts'
 import { createServer as createPublicServer } from '../index.ts'
 import { parseOptions } from './options.ts'
 import { Transform } from 'node:stream'
+import { createServer as createNetServer } from 'node:net'
+import type { AddressInfo, Server as NetServer } from 'node:net'
 import type { BrowserSyncPluginModule, PluginMiddleware } from './plugin-types.ts'
 
 interface TestWebSocket extends WebSocket {
@@ -14,6 +16,22 @@ interface TestWebSocket extends WebSocket {
 
 function makeOpts (overrides = {}) {
   return parseOptions({ port: 0, ui: false, server: false, files: [], logLevel: 'silent', ...overrides })
+}
+
+function listenNetServer (server: NetServer, port = 0): Promise<number> {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(port, '0.0.0.0', () => {
+      server.off('error', reject)
+      resolve((server.address() as AddressInfo).port)
+    })
+  })
+}
+
+function closeNetServer (server: NetServer): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.close(error => error ? reject(error) : resolve())
+  })
 }
 
 function connectWs (url: string): Promise<TestWebSocket> {
@@ -172,6 +190,41 @@ test('createServer: starts and returns URLs', async (t) => {
   assert.strictEqual(bs.uiUrl, null)
   assert.strictEqual(bs.uiPort, null)
   assert.ok(typeof bs.localIp === 'string')
+})
+
+test('createServer: rolls back allocated resources when UI startup fails', async (t) => {
+  const mainReservation = createNetServer()
+  const mainPort = await listenNetServer(mainReservation)
+  await closeNetServer(mainReservation)
+
+  const occupiedUiServer = createNetServer()
+  const uiPort = await listenNetServer(occupiedUiServer)
+  t.after(() => closeNetServer(occupiedUiServer))
+
+  let pluginCleaned = false
+  const plugin: BrowserSyncPluginModule = {
+    plugin (bs) {
+      bs.registerCleanupTask(() => { pluginCleaned = true })
+    },
+  }
+
+  await assert.rejects(
+    createServer({
+      port: mainPort,
+      ui: { port: uiPort },
+      server: false,
+      files: [],
+      plugins: [plugin],
+      logLevel: 'silent',
+    }),
+    (error: NodeJS.ErrnoException) => error.code === 'EADDRINUSE'
+  )
+
+  assert.strictEqual(pluginCleaned, true)
+
+  const mainPortVerifier = createNetServer()
+  await listenNetServer(mainPortVerifier, mainPort)
+  await closeNetServer(mainPortVerifier)
 })
 
 test('createServer: public API accepts README-style unnormalized options', async (t) => {
@@ -859,6 +912,19 @@ test('createServer: events emitter is an EventEmitter', async (t) => {
 test('createServer: .exit() closes cleanly', async () => {
   const bs = await createServer(makeOpts())
   await assert.doesNotReject(() => bs.exit())
+})
+
+test('createServer: UI exit removes listeners from the public event emitter', async () => {
+  const bs = await createServer(makeOpts({ ui: true }))
+  assert.ok(bs.events.listenerCount('client:connect') > 0)
+  assert.ok(bs.events.listenerCount('client:disconnect') > 0)
+  assert.ok(bs.events.listenerCount('client:update') > 0)
+
+  await bs.exit()
+
+  assert.strictEqual(bs.events.listenerCount('client:connect'), 0)
+  assert.strictEqual(bs.events.listenerCount('client:disconnect'), 0)
+  assert.strictEqual(bs.events.listenerCount('client:update'), 0)
 })
 
 test('createServer: UI starts when ui option is enabled', async (t) => {
