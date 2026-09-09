@@ -1013,12 +1013,17 @@ test('createServer: remote debug assets are served from the main server', { time
   assert.ok((res.headers.get('content-type') ?? '').includes('text/css'))
   const css = await res.text()
   assert.ok(css.includes('outline'))
+  assert.ok(css.includes('body { outline: 1px solid #2980b9 !important; }'))
+  assert.ok(css.includes('main { outline: 1px solid #2f4f90 !important; }'))
+  assert.ok(!css.includes('box-shadow'), 'outlining must not enable depth shadows')
+  assert.ok(!css.includes('background'), 'outlining must preserve page backgrounds')
 
   const depthRes = await fetch(`${bs.url}/browser-sync/pesticide-depth.css`)
   assert.strictEqual(depthRes.status, 200)
   assert.ok((depthRes.headers.get('content-type') ?? '').includes('text/css'))
   const depthCss = await depthRes.text()
   assert.ok(depthCss.includes('box-shadow'))
+  assert.ok(!depthCss.includes('outline'), 'depth must not enable outlines')
 })
 
 test('createServer: remote debug no-cache UI control affects responses', { timeout: 10000 }, async (t) => {

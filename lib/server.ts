@@ -182,9 +182,11 @@ async function startServer (
     return reply.send(content)
   })
 
+  // Keep outlines and depth in separate, vendored stylesheets so each control
+  // can be removed without resetting any of the page's own styles.
   const remoteDebugAssets = [
-    { path: '/browser-sync/pesticide.css', file: fileURLToPath(import.meta.resolve('pesticide/css/pesticide.css')) },
-    { path: '/browser-sync/pesticide-depth.css', file: fileURLToPath(import.meta.resolve('pesticide/css/pesticide-depth.css')) },
+    { path: '/browser-sync/pesticide.css', file: resolve(__dirname, 'remote-debug/pesticide.css') },
+    { path: '/browser-sync/pesticide-depth.css', file: resolve(__dirname, 'remote-debug/pesticide-depth.css') },
   ]
 
   for (const asset of remoteDebugAssets) {

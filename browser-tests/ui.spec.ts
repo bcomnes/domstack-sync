@@ -119,6 +119,48 @@ test('history UI tracks pages, syncs all browsers, removes entries, and clears h
   await expect(ui.getByText('Pages opened in connected browsers will appear here.')).toBeVisible()
 })
 
+test('remote debug CSS outlining and depth toggle independently and restore page styles', async ({ context, page, startServer }) => {
+  const bs = await startServer({ ui: true })
+  await gotoAndWaitForClient(page, bs, '/')
+  // Non-default author styles catch fixes that reset shadows/backgrounds instead
+  // of keeping depth declarations out of the outlining stylesheet.
+  await page.addStyleTag({ content: 'main { outline: 2px dashed rgb(1, 2, 3); box-shadow: 1px 2px 3px rgb(4, 5, 6); background-color: rgb(7, 8, 9); }' })
+  const styles = () => page.locator('main').evaluate((element) => {
+    const style = getComputedStyle(element)
+    return { outline: style.outline, shadow: style.boxShadow, background: style.backgroundColor }
+  })
+  const original = await styles()
+  const outlined = { ...original, outline: 'rgb(47, 79, 144) solid 1px' }
+  const depth = {
+    ...original,
+    shadow: 'rgba(0, 0, 0, 0.6) 0px 0px 16px 0px',
+    background: 'rgba(255, 255, 255, 0.25)',
+  }
+  const both = { ...depth, outline: outlined.outline }
+
+  const ui = await context.newPage()
+  await ui.goto(`${bs.uiUrl}/remote-debug`)
+  const outlineToggle = ui.locator('.option-item').filter({ hasText: 'CSS Outlining' })
+  const depthToggle = ui.locator('.option-item').filter({ hasText: 'CSS Depth Outlining' })
+
+  // Exercise both activation orders, and removing either mode while the other
+  // remains active. Wait for the UI response as each action replaces the form.
+  for (const [toggle, active, expected] of [
+    [outlineToggle, true, outlined],
+    [depthToggle, true, both],
+    [outlineToggle, false, depth],
+    [depthToggle, false, original],
+    [depthToggle, true, depth],
+    [outlineToggle, true, both],
+    [depthToggle, false, outlined],
+    [outlineToggle, false, original],
+  ] as const) {
+    await toggle.locator('label.toggle').click()
+    await expect(toggle.locator('input[name="active"]')).toBeChecked({ checked: active })
+    await expect.poll(styles).toEqual(expected)
+  }
+})
+
 test('remote debug UI injects client CSS and overlay grid DOM nodes', async ({ context, page, startServer }) => {
   const bs = await startServer({ ui: true })
   await gotoAndWaitForClient(page, bs, '/')
