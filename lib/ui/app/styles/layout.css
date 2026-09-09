@@ -225,7 +225,7 @@ form {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: var(--text);
+  background: var(--toggle-thumb);
   transition: transform 0.15s;
 }
 

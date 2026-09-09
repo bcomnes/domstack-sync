@@ -1,47 +1,56 @@
 import { expect, gotoAndWaitForClient, test } from './support.ts'
 import type { BrowserSyncPluginModule } from '../lib/plugin-types.ts'
 
-test.describe('before the UI client connects', () => {
-  test.use({ javaScriptEnabled: false })
+for (const theme of [
+  { scheme: 'light', green: 'rgb(4, 120, 87)', amber: 'rgb(146, 64, 14)', red: 'rgb(185, 28, 28)' },
+  { scheme: 'dark', green: 'rgb(52, 211, 153)', amber: 'rgb(251, 191, 36)', red: 'rgb(248, 113, 113)' },
+] as const) {
+  test.describe(`${theme.scheme} connection status`, () => {
+    test.use({ colorScheme: theme.scheme })
 
-  test('renders an amber connecting dot rather than claiming to be connected', async ({ page, startServer }) => {
-    const bs = await startServer({ ui: true })
-    await page.goto(`${bs.uiUrl}/`)
-    const status = page.getByRole('status')
-    await expect(status).toHaveText('Connecting')
-    await expect(status).toHaveAttribute('data-status', 'connecting')
-    expect(await status.evaluate(element => getComputedStyle(element, '::before').backgroundColor)).toBe('rgb(251, 191, 36)')
+    test.describe('before the UI client connects', () => {
+      test.use({ javaScriptEnabled: false })
+
+      test('renders an amber connecting dot rather than claiming to be connected', async ({ page, startServer }) => {
+        const bs = await startServer({ ui: true })
+        await page.goto(`${bs.uiUrl}/`)
+        const status = page.getByRole('status')
+        await expect(status).toHaveText('Connecting')
+        await expect(status).toHaveAttribute('data-status', 'connecting')
+        expect(await status.evaluate(element => getComputedStyle(element, '::before').backgroundColor)).toBe(theme.amber)
+      })
+    })
+
+    test('updates the header status dot on connection loss and recovery', async ({ page, startServer }) => {
+      const bs = await startServer({ ui: true })
+      await page.clock.install()
+      await page.clock.pauseAt(new Date(Date.now() + 1000))
+      let disconnect = (): void => { throw new Error('UI socket has not connected') }
+      await page.routeWebSocket(/\/ws\?/, (socket) => {
+        socket.connectToServer()
+        disconnect = () => socket.close()
+      })
+      await page.goto(`${bs.uiUrl}/`)
+      const status = page.getByRole('status')
+      await expect(status).toHaveText('Connected')
+      await expect(status).toHaveAttribute('data-status', 'connected')
+      expect(await status.evaluate((element) => {
+        const dot = getComputedStyle(element, '::before')
+        return { color: dot.backgroundColor, width: dot.width, height: dot.height, radius: dot.borderRadius, content: dot.content }
+      })).toEqual({ color: theme.green, width: '8px', height: '8px', radius: '50%', content: '""' })
+
+      disconnect()
+      await expect(status).toHaveText('Disconnected. Reconnecting')
+      await expect(status).toHaveAttribute('data-status', 'disconnected')
+      expect(await status.evaluate(element => getComputedStyle(element, '::before').backgroundColor)).toBe(theme.red)
+
+      await page.clock.runFor(250)
+      await expect(status).toHaveText('Connected')
+      await expect(status).toHaveAttribute('data-status', 'connected')
+      expect(await status.evaluate(element => getComputedStyle(element, '::before').backgroundColor)).toBe(theme.green)
+    })
   })
-})
-
-test('updates the header status dot on connection loss and recovery', async ({ page, startServer }) => {
-  const bs = await startServer({ ui: true })
-  await page.clock.install()
-  await page.clock.pauseAt(new Date(Date.now() + 1000))
-  let disconnect = (): void => { throw new Error('UI socket has not connected') }
-  await page.routeWebSocket(/\/ws\?/, (socket) => {
-    socket.connectToServer()
-    disconnect = () => socket.close()
-  })
-  await page.goto(`${bs.uiUrl}/`)
-  const status = page.getByRole('status')
-  await expect(status).toHaveText('Connected')
-  await expect(status).toHaveAttribute('data-status', 'connected')
-  expect(await status.evaluate((element) => {
-    const dot = getComputedStyle(element, '::before')
-    return { color: dot.backgroundColor, width: dot.width, height: dot.height, radius: dot.borderRadius, content: dot.content }
-  })).toEqual({ color: 'rgb(52, 211, 153)', width: '8px', height: '8px', radius: '50%', content: '""' })
-
-  disconnect()
-  await expect(status).toHaveText('Disconnected. Reconnecting')
-  await expect(status).toHaveAttribute('data-status', 'disconnected')
-  expect(await status.evaluate(element => getComputedStyle(element, '::before').backgroundColor)).toBe('rgb(248, 113, 113)')
-
-  await page.clock.runFor(250)
-  await expect(status).toHaveText('Connected')
-  await expect(status).toHaveAttribute('data-status', 'connected')
-  expect(await status.evaluate(element => getComputedStyle(element, '::before').backgroundColor)).toBe('rgb(52, 211, 153)')
-})
+}
 
 test('renders all built-in UI pages in Chromium', async ({ page, startServer }) => {
   const bs = await startServer({ ui: true })
