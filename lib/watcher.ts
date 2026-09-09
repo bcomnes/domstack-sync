@@ -24,6 +24,7 @@ export class BsWatcher extends EventEmitter {
   private readonly watchers: Array<ReturnType<typeof watch>> = []
   private debounceTimer: NodeJS.Timeout | null = null
   private pendingEvents: WatchEvent[] = []
+  private closePromise: Promise<void> | null = null
   private readonly debounceMs: number
   private readonly isIgnored: ((path: string) => boolean) | null
   private readonly watchEvents: string[]
@@ -48,7 +49,7 @@ export class BsWatcher extends EventEmitter {
     }
 
     for (const entry of opts.files.filter(isWatchObject)) {
-      const watchOpts = entry.options ?? defaultWatchOpts
+      const watchOpts = { ...defaultWatchOpts, ...entry.options }
       const handler = typeof entry.fn === 'function'
         ? bindWatchFn(entry.fn, opts.fnContext)
         : this.handleDefaultWatchEvent
@@ -62,7 +63,10 @@ export class BsWatcher extends EventEmitter {
     handler: (event: string, path: string) => void
   ): ReturnType<typeof watch> {
     const watcher = watch(match, options)
-    watcher.on('all', handler)
+    watcher.on('all', (event, path) => {
+      if (this.closePromise) return
+      handler(event, path)
+    })
     return watcher
   }
 
@@ -81,13 +85,23 @@ export class BsWatcher extends EventEmitter {
       this.pendingEvents = []
       this.emit('changes', batch)
       for (const event of batch) {
+        // A batch or individual event listener may close the watcher synchronously.
+        if (this.closePromise) break
         this.emit('change', event)
       }
     }, this.debounceMs)
   }
 
   close (): Promise<void> {
-    return Promise.all(this.watchers.map(watcher => watcher.close())).then(() => undefined)
+    if (this.closePromise) return this.closePromise
+    if (this.debounceTimer) clearTimeout(this.debounceTimer)
+    this.debounceTimer = null
+    this.pendingEvents = []
+    // Mark closing before invoking underlying cleanup, and share its completion.
+    this.closePromise = Promise.resolve().then(async () => {
+      await Promise.all(this.watchers.map(watcher => watcher.close()))
+    })
+    return this.closePromise
   }
 }
 

@@ -3,6 +3,7 @@ import assert from 'node:assert'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { once } from 'node:events'
 import { BsWatcher } from './watcher.ts'
 import type { WatchEvent } from './watcher.ts'
 
@@ -134,6 +135,72 @@ test('BsWatcher: object watcher without fn uses default change pipeline', { time
   assert.ok(evt.path.includes('object-default.css'))
 })
 
+for (const cwdSource of ['cwd', 'watchOptions'] as const) {
+  test(`BsWatcher: object options inherit ${cwdSource} and watcher defaults`, { timeout: 8000 }, async (t) => {
+    const dir = makeTmpDir()
+    const file = join(dir, 'inherited.css')
+    const ignoredFile = join(dir, 'ignored.css')
+    writeFileSync(file, 'before')
+    writeFileSync(ignoredFile, 'before')
+    const watcher = new BsWatcher({
+      files: [{ match: ['inherited.css', 'ignored.css'], options: { awaitWriteFinish: false } }],
+      cwd: cwdSource === 'cwd' ? dir : join(dir, 'unused'),
+      watchOptions: {
+        ...(cwdSource === 'watchOptions' ? { cwd: dir } : {}),
+        usePolling: true,
+        interval: 10,
+        ignored: (path: string) => path.endsWith('ignored.css'),
+      },
+      watchEvents: ['add', 'change'],
+      debounceMs: 20,
+    })
+    t.after(async () => {
+      await watcher.close()
+      rmSync(dir, { recursive: true, force: true })
+    })
+    const events: WatchEvent[] = []
+    watcher.on('change', event => events.push(event))
+    // Observe Chokidar directly to wait for readiness without arbitrary startup sleeps.
+    const underlying = watcher['watchers'][0]!
+    await withTimeout('inherited watcher ready', once(underlying, 'ready'))
+    const changed = withTimeout('inherited watcher change', once(watcher, 'change'))
+    writeFileSync(file, 'after')
+    writeFileSync(ignoredFile, 'after')
+    await changed
+    await new Promise(resolve => setTimeout(resolve, 100))
+
+    assert.deepStrictEqual(events.map(({ event, path }) => ({ event, path })), [
+      { event: 'change', path: 'inherited.css' },
+    ])
+    assert.strictEqual(underlying.options.ignoreInitial, true)
+    assert.strictEqual(underlying.options.usePolling, true)
+    assert.strictEqual(underlying.options.interval, 10)
+  })
+}
+
+test('BsWatcher: entry options override inherited cwd, ignores, and ignoreInitial', { timeout: 8000 }, async (t) => {
+  const dir = makeTmpDir()
+  writeFileSync(join(dir, 'override.css'), 'body {}')
+  const watcher = new BsWatcher({
+    cwd: join(dir, 'unused'),
+    watchOptions: { ignored: () => true, usePolling: true, interval: 10 },
+    files: [{
+      match: 'override.css',
+      options: { cwd: dir, ignoreInitial: false, ignored: () => false },
+    }],
+    watchEvents: ['add'],
+    debounceMs: 20,
+  })
+  t.after(async () => {
+    await watcher.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+  const [event] = await withTimeout('entry override add', once(watcher, 'change'))
+  assert.strictEqual(event.event, 'add')
+  assert.strictEqual(event.path, 'override.css')
+  assert.strictEqual(watcher['watchers'][0]!.options.usePolling, true)
+})
+
 test('BsWatcher: preserves explicit watchOptions.cwd', { timeout: 8000 }, async (t) => {
   const topLevelCwd = makeTmpDir()
   const explicitCwd = makeTmpDir()
@@ -217,4 +284,78 @@ test('BsWatcher: close resolves cleanly', async (t) => {
 
   const watcher = new BsWatcher({ files: [dir], debounceMs: 50 })
   await assert.doesNotReject(() => watcher.close())
+})
+
+test('BsWatcher: close discards pending batches and ignores late events', { timeout: 8000 }, async (t) => {
+  const dir = makeTmpDir()
+  const file = join(dir, 'pending.css')
+  writeFileSync(file, 'before')
+  const watcher = new BsWatcher({
+    files: [file],
+    debounceMs: 200,
+    watchOptions: { usePolling: true, interval: 10 },
+  })
+  t.after(async () => {
+    await watcher.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+  let batches = 0
+  let events = 0
+  watcher.on('changes', () => batches++)
+  watcher.on('change', () => events++)
+  const underlying = watcher['watchers'][0]!
+  await withTimeout('closing watcher ready', once(underlying, 'ready'))
+  const queued = withTimeout('pending filesystem change', once(underlying, 'change'))
+  writeFileSync(file, 'after modification')
+  await queued
+  assert.strictEqual(batches, 0, 'close before the debounce timer fires')
+  const onEvent = underlying.listeners('all')[0]!
+  const closing = watcher.close()
+  const closingAgain = watcher.close()
+  await closing
+  // Simulate an already queued callback from the underlying event source.
+  onEvent('change', file)
+  await new Promise(resolve => setTimeout(resolve, 300))
+  assert.strictEqual(batches, 0)
+  assert.strictEqual(events, 0)
+  assert.strictEqual(closingAgain, closing, 'repeated close calls share completion')
+})
+
+test('BsWatcher: close inside a batch listener stops individual event delivery', { timeout: 8000 }, async (t) => {
+  const dir = makeTmpDir()
+  const file = join(dir, 'batch.css')
+  writeFileSync(file, 'before')
+  const watcher = new BsWatcher({
+    files: [file],
+    debounceMs: 20,
+    watchOptions: { usePolling: true, interval: 10 },
+  })
+  t.after(async () => {
+    await watcher.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+  let events = 0
+  watcher.on('change', () => events++)
+  const closed = new Promise<void>((resolve, reject) => {
+    watcher.once('changes', () => { watcher.close().then(resolve, reject) })
+  })
+  await withTimeout('batch watcher ready', once(watcher['watchers'][0]!, 'ready'))
+  writeFileSync(file, 'after modification')
+  await withTimeout('close during batch', closed)
+  assert.strictEqual(events, 0)
+})
+
+test('BsWatcher: close stops custom entry callbacks', async (t) => {
+  let calls = 0
+  const watcher = new BsWatcher({
+    files: [{ match: [], fn: () => { calls++ } }],
+  })
+  t.after(() => watcher.close())
+  const underlying = watcher['watchers'][0]!
+  const onEvent = underlying.listeners('all')[0]!
+  underlying.emit('all', 'change', 'before.css')
+  assert.strictEqual(calls, 1)
+  await watcher.close()
+  onEvent('change', 'after.css')
+  assert.strictEqual(calls, 1)
 })
