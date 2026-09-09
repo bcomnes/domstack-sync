@@ -1,5 +1,65 @@
 import { expect, gotoAndWaitForClient, test, waitForNoClientUpdate } from './support.ts'
 
+for (const mode of ['document', 'element', 'mapped element'] as const) {
+  test(`applies synced ${mode} positions instantly without disabling local smooth scrolling`, async ({ context, page, startServer }) => {
+    const sourceSelector = mode === 'document' ? null : '#source-pane'
+    const targetSelector = mode === 'mapped element' ? '#target-pane' : sourceSelector
+    const bs = await startServer({
+      scrollProportionally: false,
+      scrollElementMapping: mode === 'mapped element' ? ['#source-pane', '#target-pane'] : [],
+    })
+    const target = await context.newPage()
+    const [, targetInfo] = await Promise.all([
+      gotoAndWaitForClient(page, bs, '/scroll.html#source'),
+      gotoAndWaitForClient(target, bs, '/scroll.html#target'),
+    ])
+    await target.addStyleTag({ content: 'html, #source-pane, #target-pane { scroll-behavior: smooth; }' })
+
+    // Observe the native position immediately after each incoming scrollTo call.
+    // Polling only the final position would also pass with an unwanted animation.
+    await target.evaluate((selector) => {
+      const scroller = selector ? document.querySelector<HTMLElement>(selector)! : window
+      const samples: number[] = []
+      scroller.scrollTo = new Proxy(scroller.scrollTo, {
+        apply (scrollTo, receiver, args) {
+          Reflect.apply(scrollTo, receiver, args)
+          samples.push(scroller instanceof Window ? scroller.scrollY : scroller.scrollTop)
+          document.body.dataset['scrollSamples'] = JSON.stringify(samples)
+        },
+      })
+    }, targetSelector)
+
+    // Observe beyond the client's one-second echo suppression window.
+    const noTargetEcho = waitForNoClientUpdate(bs, info => info.id === targetInfo.id, 1500)
+      .then(() => null, error => error as Error)
+    const positions = [320, 80, 400]
+    for (const [index, top] of positions.entries()) {
+      await page.evaluate(({ selector, top }) => {
+        const scroller = selector ? document.querySelector<HTMLElement>(selector)! : window
+        scroller.scrollTo({ top, left: 0, behavior: 'instant' })
+      }, { selector: sourceSelector, top })
+      await expect(target.locator('body')).toHaveAttribute('data-scroll-samples', JSON.stringify(positions.slice(0, index + 1)))
+    }
+    expect(await noTargetEcho).toBeNull()
+
+    // A normal local scroll still follows the site's CSS, rather than jumping.
+    const localScroll = await target.evaluate((selector) => {
+      const element = selector ? document.querySelector<HTMLElement>(selector)! : document.documentElement
+      const scroller = selector ? element : window
+      scroller.scrollTo(0, 0)
+      return {
+        behavior: getComputedStyle(element).scrollBehavior,
+        top: scroller instanceof Window ? scroller.scrollY : scroller.scrollTop,
+      }
+    }, targetSelector)
+    expect(localScroll.behavior).toBe('smooth')
+    expect(localScroll.top).toBeGreaterThan(0)
+    await expect.poll(() => target.evaluate((selector) => {
+      return selector ? document.querySelector<HTMLElement>(selector)!.scrollTop : window.scrollY
+    }, targetSelector)).toBe(0)
+  })
+}
+
 test('syncs document scroll once without echoing the remote scroll back', async ({ context, page, startServer }) => {
   const bs = await startServer()
   const sourceInfoPromise = gotoAndWaitForClient(page, bs, '/scroll.html#source')

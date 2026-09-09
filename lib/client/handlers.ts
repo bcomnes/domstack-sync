@@ -143,7 +143,8 @@ export function handleScroll (event: ScrollMessage | ScrollElementMessage, opts:
     const nextX = opts.scrollProportionally ? scrollSpace.x * event.position.proportional.x : event.position.raw.x
     const nextY = opts.scrollProportionally ? scrollSpace.y * event.position.proportional.y : event.position.raw.y
     if (isNear(window.pageXOffset, nextX) && isNear(window.pageYOffset, nextY)) return
-    window.scrollTo(nextX, nextY)
+    // Replay the source position, not another animation honoring the site's smooth scrolling.
+    window.scrollTo({ left: nextX, top: nextY, behavior: 'instant' })
     return
   }
 
@@ -172,7 +173,8 @@ function scrollElement (element: HTMLElement, event: ScrollMessage | ScrollEleme
     ? (element.scrollHeight - element.clientHeight) * event.position.proportional.y
     : event.position.raw.y
   if (isNear(element.scrollLeft, nextX) && isNear(element.scrollTop, nextY)) return
-  element.scrollTo(nextX, nextY)
+  // As with document scrolling, incoming positions must bypass CSS scroll-behavior.
+  element.scrollTo({ left: nextX, top: nextY, behavior: 'instant' })
 }
 
 function isNear (current: number, next: number): boolean {
