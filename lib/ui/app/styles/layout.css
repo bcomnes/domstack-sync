@@ -25,10 +25,6 @@
   text-align: center;
 }
 
-.connection-status--connected { color: var(--green); }
-.connection-status--connecting,
-.connection-status--disconnected { color: var(--text-muted); }
-
 .nav__links {
   display: flex;
   gap: 4px;
@@ -113,6 +109,10 @@
 .hint { color: var(--text-muted); font-size: 13px; margin-top: 12px; }
 .loading { color: var(--text-muted); padding: 48px 0; text-align: center; }
 .connection-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   margin-bottom: 16px;
   padding: 8px 12px;
   border: 1px solid var(--border);
@@ -121,6 +121,19 @@
   background: var(--bg-card);
   font-size: 13px;
 }
+
+.connection-status::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.connection-status--connected { color: var(--green); }
+.connection-status--connecting { color: var(--amber); }
+.connection-status--disconnected { color: var(--red); }
 
 .connection-list, .history-list, .option-list { list-style: none; }
 
