@@ -287,27 +287,20 @@ test('BsWatcher: close resolves cleanly', async (t) => {
 })
 
 test('BsWatcher: close discards pending batches and ignores late events', { timeout: 8000 }, async (t) => {
-  const dir = makeTmpDir()
-  const file = join(dir, 'pending.css')
-  writeFileSync(file, 'before')
+  const file = 'pending.css'
   const watcher = new BsWatcher({
-    files: [file],
+    files: [{ match: [] }],
     debounceMs: 200,
-    watchOptions: { usePolling: true, interval: 10 },
   })
-  t.after(async () => {
-    await watcher.close()
-    rmSync(dir, { recursive: true, force: true })
-  })
+  t.after(() => watcher.close())
   let batches = 0
   let events = 0
   watcher.on('changes', () => batches++)
   watcher.on('change', () => events++)
   const underlying = watcher['watchers'][0]!
-  await withTimeout('closing watcher ready', once(underlying, 'ready'))
-  const queued = withTimeout('pending filesystem change', once(underlying, 'change'))
-  writeFileSync(file, 'after modification')
-  await queued
+  // Exercise shutdown independently of filesystem polling startup.
+  underlying.emit('all', 'change', file)
+  assert.strictEqual(watcher['pendingEvents'].length, 1)
   assert.strictEqual(batches, 0, 'close before the debounce timer fires')
   const onEvent = underlying.listeners('all')[0]!
   const closing = watcher.close()
@@ -322,25 +315,19 @@ test('BsWatcher: close discards pending batches and ignores late events', { time
 })
 
 test('BsWatcher: close inside a batch listener stops individual event delivery', { timeout: 8000 }, async (t) => {
-  const dir = makeTmpDir()
-  const file = join(dir, 'batch.css')
-  writeFileSync(file, 'before')
   const watcher = new BsWatcher({
-    files: [file],
+    files: [{ match: [] }],
     debounceMs: 20,
-    watchOptions: { usePolling: true, interval: 10 },
   })
-  t.after(async () => {
-    await watcher.close()
-    rmSync(dir, { recursive: true, force: true })
-  })
+  t.after(() => watcher.close())
   let events = 0
   watcher.on('change', () => events++)
   const closed = new Promise<void>((resolve, reject) => {
     watcher.once('changes', () => { watcher.close().then(resolve, reject) })
   })
-  await withTimeout('batch watcher ready', once(watcher['watchers'][0]!, 'ready'))
-  writeFileSync(file, 'after modification')
+  // Chokidar's ready event can precede the polling baseline; inject the event
+  // so this test measures close-during-delivery rather than filesystem timing.
+  watcher['watchers'][0]!.emit('all', 'change', 'batch.css')
   await withTimeout('close during batch', closed)
   assert.strictEqual(events, 0)
 })
