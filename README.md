@@ -39,7 +39,18 @@ domstack-sync init
 
 # Trigger a reload from another terminal
 domstack-sync reload --port 3000
+
+# List active local sessions or inspect one ID from the list
+domstack-sync sessions
+domstack-sync sessions --json
+domstack-sync sessions <id> --json
 ```
+
+`sessions` works from any directory and does not load project config. It lists registered sessions for the current user, including standalone Sync servers and tools that use the shared registry. JSON output is an array for a list and an object for a single session; a missing ID exits nonzero. The records contain lifecycle, paths, and local access ports, not WebSocket tokens or launcher options.
+
+On POSIX the registry uses `$XDG_RUNTIME_DIR/domstack-sessions` when set to an absolute path, otherwise `/tmp/domstack-sessions-<uid>` so shells with different `TMPDIR` values still share it. On Windows it uses `domstack/sessions` under `%LOCALAPPDATA%` (or the user's `AppData/Local`). Set `DOMSTACK_SESSION_DIR` to use a different private directory; launchers and readers must use the same directory. POSIX registry directories must be owned by the current user and not accessible to group or other users. On Windows, use a directory protected by the user's filesystem ACLs. An unresponsive process can temporarily disappear from discovery when its lease expires; discovery is not a lock.
+
+Library consumers can import `createSessionRegistry()` to register, update, dispose, list, and look up sessions independently of an HTTP server. Library `createServer()` calls are not registered automatically.
 
 ### CLI flags
 
@@ -177,7 +188,7 @@ import type { ServerToClientMessage, ClientToServerMessage } from '@domstack/syn
 - **File injection** — when a watched injectable file changes and `injectChanges: true`, matching DOM assets are cache-busted in place without a full page reload. CSS stylesheets, imported stylesheets, images, inline image URLs, and configured asset tags are supported. Falls back to a full reload if no matching asset is found.
 - **Ghost mode** — scroll position, clicks, location changes, and form input changes in one browser are relayed to all other connected browsers via the WebSocket server. Disable with `ghostMode: false` or `--no-ghost-mode`.
 - **UI panel** — a separate Fastify server on an auto-detected port shows connected browsers, file-change history, and server URLs. Disable with `ui: false` or `--no-ui`.
-- **Port selection** — the requested port is tried first. If it is already in use, the OS assigns a free ephemeral port automatically.
+- **Port selection** — the server binds the requested port first and asks the OS for an available port only if that port is in use. The automatic UI port behaves the same way; an explicit `ui: { port }` is strict. Use the reported URL or `instance.port` and `instance.uiPort` for the actual ports, including when targeting `reload --port`.
 
 ## License
 

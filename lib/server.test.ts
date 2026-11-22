@@ -194,6 +194,64 @@ test('createServer: starts and returns URLs', async (t) => {
   assert.ok(typeof bs.localIp === 'string')
 })
 
+test('createServer: concurrent starts use the actual site and UI ports after a bind collision', async (t) => {
+  const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const root = mkdtempSync(join(tmpdir(), 'sync-bind-race-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  writeFileSync(join(root, 'index.html'), '<!doctype html><body>site</body>')
+
+  const reservation = createNetServer()
+  const preferred = await listenNetServer(reservation)
+  await closeNetServer(reservation)
+
+  // Hold every startup in plugin initialization, after the old probe would
+  // already have run, then take its preferred port with a real listener.
+  const entered = Promise.withResolvers<void>()
+  const resume = Promise.withResolvers<void>()
+  let initialized = 0
+  const plugin: BrowserSyncPluginModule = {
+    async plugin () {
+      if (++initialized === 3) entered.resolve()
+      await resume.promise
+    },
+  }
+  const starts = Array.from({ length: 3 }, async () => {
+    const bs = await createServer({ ...makeOpts(), port: preferred, server: root, ui: true, plugins: [plugin] })
+    t.after(() => bs.exit())
+    return bs
+  })
+  const all = Promise.all(starts)
+  const blocker = createNetServer()
+  try {
+    await withTimeout('plugin initialization', Promise.race([entered.promise, all.then(() => {})]))
+    await listenNetServer(blocker, preferred)
+    t.after(() => closeNetServer(blocker))
+  } finally {
+    resume.resolve()
+  }
+  const instances = await all
+  assert.equal(initialized, 3)
+  const ports = new Set<number>([preferred])
+  for (const bs of instances) {
+    assert.ok(bs.uiPort && bs.uiUrl && bs.uiSocketUrl)
+    assert.equal(new URL(bs.url).port, String(bs.port))
+    const snippetPort = new RegExp(`':${bs.port}/__bs/`)
+    assert.match(bs.snippet, snippetPort)
+    const site = await fetch(bs.url)
+    assert.equal(site.status, 200)
+    assert.match(await site.text(), snippetPort)
+    assert.equal(new URL(bs.socketUrl).port, String(bs.port))
+    assert.equal(new URL(bs.uiUrl).port, String(bs.uiPort))
+    assert.equal(new URL(bs.uiSocketUrl).port, String(bs.uiPort))
+    assert.equal((await fetch(bs.uiUrl)).status, 200)
+    ports.add(bs.port)
+    ports.add(bs.uiPort)
+  }
+  assert.equal(ports.size, 7)
+})
+
 test('createServer: browser WebSockets require the injected session token', async (t) => {
   const bs = await createServer(makeOpts())
   t.after(() => bs.exit())
@@ -934,9 +992,15 @@ test('createServer: events emitter is an EventEmitter', async (t) => {
   assert.ok(bs.events instanceof EventEmitter)
 })
 
-test('createServer: .exit() closes cleanly', async () => {
-  const bs = await createServer(makeOpts())
-  await assert.doesNotReject(() => bs.exit())
+test('createServer: .exit() releases both actual listener ports', async () => {
+  const bs = await createServer(makeOpts({ ui: true }))
+  await bs.exit()
+  assert.ok(bs.uiPort)
+  for (const port of [bs.port, bs.uiPort]) {
+    const verifier = createNetServer()
+    await listenNetServer(verifier, port)
+    await closeNetServer(verifier)
+  }
 })
 
 test('createServer: UI exit removes listeners from the public event emitter', async () => {

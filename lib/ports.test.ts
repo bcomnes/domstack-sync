@@ -1,35 +1,24 @@
 import test from 'node:test'
-import assert from 'node:assert'
-import { createServer } from 'node:net'
-import { findFreePort } from './ports.ts'
+import assert from 'node:assert/strict'
+import Fastify from 'fastify'
+import { listenOnPort } from './ports.ts'
 
-test('findFreePort returns preferred port when available', async () => {
-  const port = await findFreePort(19000)
-  assert.strictEqual(port, 19000)
+test('listenOnPort: retries a real collision on an OS-assigned port', async (t) => {
+  const holder = Fastify()
+  const contender = Fastify()
+  t.after(async () => { await Promise.all([holder.close(), contender.close()]) })
+  const preferred = await listenOnPort(holder, 0, false)
+  const actual = await listenOnPort(contender, preferred, true)
+  assert.notEqual(actual, preferred)
+  assert.equal((await fetch(`http://127.0.0.1:${actual}`)).status, 404)
 })
 
-test('findFreePort falls back to OS-assigned port when preferred is taken', async () => {
-  // Hold port 19001 open so findFreePort must fall back
-  const holder = createServer()
-  await new Promise<void>(resolve => holder.listen(19001, resolve))
-
-  try {
-    const port = await findFreePort(19001)
-    assert.ok(typeof port === 'number')
-    assert.ok(port > 0)
-    assert.notStrictEqual(port, 19001)
-  } finally {
-    await new Promise<void>(resolve => holder.close(() => resolve()))
-  }
-})
-
-test('findFreePort returns a usable port (can bind again)', async () => {
-  const port = await findFreePort(19002)
-  // The server in findFreePort is already closed, so we should be able to bind
-  const server = createServer()
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(port, resolve)
-  })
-  await new Promise<void>(resolve => server.close(() => resolve()))
+test('listenOnPort: does not retry startup-hook errors with a collision code', async (t) => {
+  const server = Fastify()
+  t.after(() => server.close())
+  const error = Object.assign(new Error('plugin failed'), { code: 'EADDRINUSE' })
+  server.addHook('onReady', async () => { throw error })
+  const listen = t.mock.method(server, 'listen')
+  await assert.rejects(listenOnPort(server, 3000, true), err => err === error)
+  assert.equal(listen.mock.callCount(), 0)
 })
