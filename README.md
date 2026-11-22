@@ -177,7 +177,7 @@ import type { ServerToClientMessage, ClientToServerMessage } from '@domstack/syn
 - **File injection** — when a watched injectable file changes and `injectChanges: true`, matching DOM assets are cache-busted in place without a full page reload. CSS stylesheets, imported stylesheets, images, inline image URLs, and configured asset tags are supported. Falls back to a full reload if no matching asset is found.
 - **Ghost mode** — scroll position, clicks, location changes, and form input changes in one browser are relayed to all other connected browsers via the WebSocket server. Disable with `ghostMode: false` or `--no-ghost-mode`.
 - **UI panel** — a separate Fastify server on an auto-detected port shows connected browsers, file-change history, and server URLs. Disable with `ui: false` or `--no-ui`.
-- **Port selection** — the requested port is tried first. If it is already in use, the OS assigns a free ephemeral port automatically.
+- **Port selection** — the server binds the requested port first and asks the OS for an available port only if that port is in use. The automatic UI port behaves the same way; an explicit `ui: { port }` is strict. Use the reported URL or `instance.port` and `instance.uiPort` for the actual ports, including when targeting `reload --port`.
 
 ## License
 

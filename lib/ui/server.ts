@@ -12,6 +12,7 @@ import type { EventEmitter } from 'node:events'
 import type { IncomingMessage } from 'node:http'
 import type { Duplex } from 'node:stream'
 import type { PluginUiEvent } from '../plugin-types.ts'
+import { getBoundPort, listenOnPort } from '../ports.ts'
 import type { BsClientInfo } from '../sockets.ts'
 import type { BrowserLocationMessage, UiElementDescriptor } from '../protocol.ts'
 import type { ClientRuntimeOptions, ClientRuntimeOptionsPatch } from '../protocol.ts'
@@ -82,8 +83,8 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
 export interface UiServerOptions {
   uiPort: number
+  fallbackPort?: boolean
   serverUrl: string
-  uiUrl: string
   localIp: string
   mainPort: number
   mode?: UiMode
@@ -276,12 +277,13 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
   })
 
   function buildState (): UiState {
+    const uiPort = getBoundPort(fastify.server)
     return {
       serverUrl: opts.serverUrl,
-      uiUrl: opts.uiUrl,
+      uiUrl: `http://127.0.0.1:${uiPort}`,
       localIp: opts.localIp,
       port: opts.mainPort,
-      uiPort: opts.uiPort,
+      uiPort,
       mode: opts.mode ?? 'server',
       snippet: opts.snippet ?? null,
       serverBaseDirs: opts.serverBaseDirs ? [...opts.serverBaseDirs] : [],
@@ -366,8 +368,9 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
     }
   })
 
+  let uiPort: number
   try {
-    await fastify.listen({ port: opts.uiPort, host: '0.0.0.0' })
+    uiPort = await listenOnPort(fastify, opts.uiPort, opts.fallbackPort ?? false)
   } catch (startupError) {
     removeEventListeners()
     try {
@@ -382,10 +385,11 @@ export async function createUiServer (opts: UiServerOptions): Promise<UiInstance
     throw startupError
   }
 
+  const uiUrl = `http://127.0.0.1:${uiPort}`
   return {
-    uiUrl: opts.uiUrl,
-    uiSocketUrl: appendSessionToken(opts.uiUrl.replace(/^http/, 'ws') + '/ws', opts.sessionToken),
-    uiPort: opts.uiPort,
+    uiUrl,
+    uiSocketUrl: appendSessionToken(`ws://127.0.0.1:${uiPort}/ws`, opts.sessionToken),
+    uiPort,
     async exit () {
       removeEventListeners()
       for (const client of wss.clients) {

@@ -2,8 +2,9 @@ import test from 'node:test'
 import assert from 'node:assert'
 import { EventEmitter } from 'node:events'
 import { WebSocket } from 'ws'
+import Fastify from 'fastify'
+import { listenOnPort } from '../ports.ts'
 import { createUiServer } from './server.ts'
-import { findFreePort } from '../ports.ts'
 import { applyGhostModePatch } from '../options.ts'
 import type { BrowserLocationMessage } from '../protocol.ts'
 import type { ClientRuntimeOptions, ClientRuntimeOptionsPatch } from '../protocol.ts'
@@ -120,13 +121,15 @@ function terminateWs (ws: WebSocket): Promise<void> {
   })
 }
 
-test('createUiServer: options:set updates runtime options and broadcasts UI state', { timeout: 10000 }, async (t) => {
+test('createUiServer: options and runtime state use UI listener after fallback', { timeout: 10000 }, async (t) => {
   let options = defaultRuntimeOptions()
-  const uiPort = await findFreePort(0)
+  const holder = Fastify()
+  t.after(() => holder.close())
+  const preferred = await listenOnPort(holder, 0, false)
   const ui = await createUiServer({
-    uiPort,
+    uiPort: preferred,
+    fallbackPort: true,
     serverUrl: 'http://localhost:3000',
-    uiUrl: `http://localhost:${uiPort}`,
     localIp: '127.0.0.1',
     mainPort: 3000,
     events: new EventEmitter(),
@@ -146,10 +149,13 @@ test('createUiServer: options:set updates runtime options and broadcasts UI stat
   })
   t.after(() => ui.exit())
 
-  const { ws, message: init } = await connectWsWithFirstMessage(`ws://127.0.0.1:${uiPort}/ws`)
+  const { ws, message: init } = await connectWsWithFirstMessage(`ws://127.0.0.1:${ui.uiPort}/ws`)
   t.after(() => terminateWs(ws))
 
   assert.strictEqual(init['type'], 'init')
+  assert.notEqual(ui.uiPort, preferred)
+  assert.equal(new URL(ui.uiUrl).port, String(ui.uiPort))
+  assert.equal((init['data'] as { uiPort: number }).uiPort, ui.uiPort)
   ws.messages.shift()
 
   const update = nextMessage(ws)
@@ -172,11 +178,9 @@ test('createUiServer: options:set updates runtime options and broadcasts UI stat
 })
 
 test('createUiServer: initial state includes overview mode metadata', { timeout: 10000 }, async (t) => {
-  const uiPort = await findFreePort(0)
   const ui = await createUiServer({
-    uiPort,
+    uiPort: 0,
     serverUrl: 'http://localhost:3000',
-    uiUrl: `http://localhost:${uiPort}`,
     localIp: '127.0.0.1',
     mainPort: 3000,
     mode: 'snippet',
@@ -194,7 +198,7 @@ test('createUiServer: initial state includes overview mode metadata', { timeout:
   })
   t.after(() => ui.exit())
 
-  const { ws, message: init } = await connectWsWithFirstMessage(`ws://127.0.0.1:${uiPort}/ws`)
+  const { ws, message: init } = await connectWsWithFirstMessage(`ws://127.0.0.1:${ui.uiPort}/ws`)
   t.after(() => terminateWs(ws))
 
   assert.strictEqual(init['type'], 'init')
@@ -213,11 +217,9 @@ test('createUiServer: initial state includes overview mode metadata', { timeout:
 })
 
 test('createUiServer: renders fragtml pages with HTMX actions', { timeout: 10000 }, async (t) => {
-  const uiPort = await findFreePort(0)
   const ui = await createUiServer({
-    uiPort,
+    uiPort: 0,
     serverUrl: 'http://localhost:3000',
-    uiUrl: `http://localhost:${uiPort}`,
     localIp: '127.0.0.1',
     mainPort: 3000,
     mode: 'server',
@@ -232,7 +234,7 @@ test('createUiServer: renders fragtml pages with HTMX actions', { timeout: 10000
   })
   t.after(() => ui.exit())
 
-  const res = await fetch(`http://127.0.0.1:${uiPort}/sync-options`)
+  const res = await fetch(`http://127.0.0.1:${ui.uiPort}/sync-options`)
   assert.strictEqual(res.status, 200)
   const html = await res.text()
   assert.ok(html.includes('<title>Sync Options - domstack-sync</title>'))
@@ -242,18 +244,16 @@ test('createUiServer: renders fragtml pages with HTMX actions', { timeout: 10000
   assert.ok(html.includes('<script type="module" src="/app.js?token=test-session-token"></script>'))
   assert.ok(!html.includes('id="app"'))
 
-  const js = await fetch(`http://127.0.0.1:${uiPort}/app.js`)
+  const js = await fetch(`http://127.0.0.1:${ui.uiPort}/app.js`)
   assert.strictEqual(js.status, 200)
   assert.ok((await js.text()).includes('htmx'))
 })
 
 test('createUiServer: HTMX options action validates and updates runtime options', { timeout: 10000 }, async (t) => {
   let options = defaultRuntimeOptions()
-  const uiPort = await findFreePort(0)
   const ui = await createUiServer({
-    uiPort,
+    uiPort: 0,
     serverUrl: 'http://localhost:3000',
-    uiUrl: `http://localhost:${uiPort}`,
     localIp: '127.0.0.1',
     mainPort: 3000,
     events: new EventEmitter(),
@@ -273,13 +273,13 @@ test('createUiServer: HTMX options action validates and updates runtime options'
   })
   t.after(() => ui.exit())
 
-  const invalid = await fetch(`http://127.0.0.1:${uiPort}/actions/options`, {
+  const invalid = await fetch(`http://127.0.0.1:${ui.uiPort}/actions/options`, {
     method: 'POST',
     body: new URLSearchParams({ key: 'scroll' }),
   })
   assert.strictEqual(invalid.status, 400)
 
-  const valid = await fetch(`http://127.0.0.1:${uiPort}/actions/options`, {
+  const valid = await fetch(`http://127.0.0.1:${ui.uiPort}/actions/options`, {
     method: 'POST',
     body: new URLSearchParams({ kind: 'ghost', key: 'scroll', returnTo: '/sync-options' }),
   })
@@ -293,11 +293,9 @@ test('createUiServer: HTMX options action validates and updates runtime options'
 
 test('createUiServer: tracks visited URLs from client updates', { timeout: 10000 }, async (t) => {
   const events = new EventEmitter()
-  const uiPort = await findFreePort(0)
   const ui = await createUiServer({
-    uiPort,
+    uiPort: 0,
     serverUrl: 'http://localhost:3000',
-    uiUrl: `http://localhost:${uiPort}`,
     localIp: '127.0.0.1',
     mainPort: 3000,
     events,
@@ -310,7 +308,7 @@ test('createUiServer: tracks visited URLs from client updates', { timeout: 10000
   })
   t.after(() => ui.exit())
 
-  const { ws } = await connectWsWithFirstMessage(`ws://127.0.0.1:${uiPort}/ws`)
+  const { ws } = await connectWsWithFirstMessage(`ws://127.0.0.1:${ui.uiPort}/ws`)
   t.after(() => terminateWs(ws))
   ws.messages.shift()
 
@@ -335,11 +333,9 @@ test('createUiServer: tracks visited URLs from client updates', { timeout: 10000
 test('createUiServer: snippet mode tracks full external history URLs', { timeout: 10000 }, async (t) => {
   const events = new EventEmitter()
   const sentLocations: BrowserLocationMessage[] = []
-  const uiPort = await findFreePort(0)
   const ui = await createUiServer({
-    uiPort,
+    uiPort: 0,
     serverUrl: 'http://localhost:3000',
-    uiUrl: `http://localhost:${uiPort}`,
     localIp: '127.0.0.1',
     mainPort: 3000,
     mode: 'snippet',
@@ -353,7 +349,7 @@ test('createUiServer: snippet mode tracks full external history URLs', { timeout
   })
   t.after(() => ui.exit())
 
-  const { ws } = await connectWsWithFirstMessage(`ws://127.0.0.1:${uiPort}/ws`)
+  const { ws } = await connectWsWithFirstMessage(`ws://127.0.0.1:${ui.uiPort}/ws`)
   t.after(() => terminateWs(ws))
   ws.messages.shift()
 
@@ -386,11 +382,9 @@ test('createUiServer: snippet mode tracks full external history URLs', { timeout
 test('createUiServer: history actions send, remove, and clear visited URLs', { timeout: 10000 }, async (t) => {
   const events = new EventEmitter()
   const sentLocations: BrowserLocationMessage[] = []
-  const uiPort = await findFreePort(0)
   const ui = await createUiServer({
-    uiPort,
+    uiPort: 0,
     serverUrl: 'http://localhost:3000',
-    uiUrl: `http://localhost:${uiPort}`,
     localIp: '127.0.0.1',
     mainPort: 3000,
     events,
@@ -403,7 +397,7 @@ test('createUiServer: history actions send, remove, and clear visited URLs', { t
   })
   t.after(() => ui.exit())
 
-  const { ws } = await connectWsWithFirstMessage(`ws://127.0.0.1:${uiPort}/ws`)
+  const { ws } = await connectWsWithFirstMessage(`ws://127.0.0.1:${ui.uiPort}/ws`)
   t.after(() => terminateWs(ws))
   ws.messages.shift()
 
@@ -455,11 +449,9 @@ test('createUiServer: history actions send, remove, and clear visited URLs', { t
 
 test('createUiServer: connection highlight action targets a client id', { timeout: 10000 }, async (t) => {
   const highlighted: string[] = []
-  const uiPort = await findFreePort(0)
   const ui = await createUiServer({
-    uiPort,
+    uiPort: 0,
     serverUrl: 'http://localhost:3000',
-    uiUrl: `http://localhost:${uiPort}`,
     localIp: '127.0.0.1',
     mainPort: 3000,
     events: new EventEmitter(),
@@ -472,7 +464,7 @@ test('createUiServer: connection highlight action targets a client id', { timeou
   })
   t.after(() => ui.exit())
 
-  const { ws } = await connectWsWithFirstMessage(`ws://127.0.0.1:${uiPort}/ws`)
+  const { ws } = await connectWsWithFirstMessage(`ws://127.0.0.1:${ui.uiPort}/ws`)
   t.after(() => terminateWs(ws))
 
   ws.send(JSON.stringify({ type: 'connection:highlight', id: 'client-a' }))
@@ -485,12 +477,10 @@ test('createUiServer: remote debug file and overlay actions target browser clien
   const added: unknown[] = []
   const removed: string[] = []
   const gridCss: string[] = []
-  const uiPort = await findFreePort(0)
   const callbacks = defaultUiCallbacks()
   const ui = await createUiServer({
-    uiPort,
+    uiPort: 0,
     serverUrl: 'http://localhost:3000',
-    uiUrl: `http://localhost:${uiPort}`,
     localIp: '127.0.0.1',
     mainPort: 3000,
     events: new EventEmitter(),
@@ -506,7 +496,7 @@ test('createUiServer: remote debug file and overlay actions target browser clien
   })
   t.after(() => ui.exit())
 
-  const { ws } = await connectWsWithFirstMessage(`ws://127.0.0.1:${uiPort}/ws`)
+  const { ws } = await connectWsWithFirstMessage(`ws://127.0.0.1:${ui.uiPort}/ws`)
   t.after(() => terminateWs(ws))
   ws.messages.shift()
 
@@ -538,11 +528,9 @@ test('createUiServer: remote debug file and overlay actions target browser clien
 test('createUiServer: remote debug no-cache and latency mutate server controls', { timeout: 10000 }, async (t) => {
   const noCache: boolean[] = []
   const latency: number[] = []
-  const uiPort = await findFreePort(0)
   const ui = await createUiServer({
-    uiPort,
+    uiPort: 0,
     serverUrl: 'http://localhost:3000',
-    uiUrl: `http://localhost:${uiPort}`,
     localIp: '127.0.0.1',
     mainPort: 3000,
     events: new EventEmitter(),
@@ -557,7 +545,7 @@ test('createUiServer: remote debug no-cache and latency mutate server controls',
   })
   t.after(() => ui.exit())
 
-  const { ws } = await connectWsWithFirstMessage(`ws://127.0.0.1:${uiPort}/ws`)
+  const { ws } = await connectWsWithFirstMessage(`ws://127.0.0.1:${ui.uiPort}/ws`)
   t.after(() => terminateWs(ws))
   ws.messages.shift()
 
@@ -573,11 +561,9 @@ test('createUiServer: remote debug no-cache and latency mutate server controls',
 test('createUiServer: network throttle creates and destroys proxy entries', { timeout: 10000 }, async (t) => {
   const created: Array<{ target: string; port: string }> = []
   const destroyed: number[] = []
-  const uiPort = await findFreePort(0)
   const ui = await createUiServer({
-    uiPort,
+    uiPort: 0,
     serverUrl: 'http://localhost:3000',
-    uiUrl: `http://localhost:${uiPort}`,
     localIp: '127.0.0.1',
     mainPort: 3000,
     events: new EventEmitter(),
@@ -595,7 +581,7 @@ test('createUiServer: network throttle creates and destroys proxy entries', { ti
   })
   t.after(() => ui.exit())
 
-  const { ws } = await connectWsWithFirstMessage(`ws://127.0.0.1:${uiPort}/ws`)
+  const { ws } = await connectWsWithFirstMessage(`ws://127.0.0.1:${ui.uiPort}/ws`)
   t.after(() => terminateWs(ws))
   ws.messages.shift()
 

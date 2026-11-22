@@ -1,20 +1,25 @@
-import { createServer } from 'node:net'
-import type { AddressInfo } from 'node:net'
+import type { FastifyListenOptions } from 'fastify'
+import type { Server } from 'node:net'
 
-function tryBind (port: number): Promise<number | null> {
-  return new Promise((resolve) => {
-    const server = createServer()
-    server.once('error', () => resolve(null))
-    server.listen(port, () => {
-      const addr = server.address() as AddressInfo
-      server.close(() => resolve(addr.port))
-    })
-  })
+export function getBoundPort (server: Server): number {
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('Expected a bound TCP listener')
+  return address.port
 }
 
-export async function findFreePort (start: number): Promise<number> {
-  const preferred = await tryBind(start)
-  if (preferred !== null) return preferred
-  // Let the OS assign a guaranteed-free ephemeral port
-  return (await tryBind(0))!
+export async function listenOnPort (
+  fastify: { ready: () => PromiseLike<unknown>; listen: (opts: FastifyListenOptions) => Promise<string>; server: Server },
+  port: number,
+  fallback: boolean
+): Promise<number> {
+  // Startup errors from ready hooks are not bind failures.
+  await fastify.ready()
+  const host = '0.0.0.0'
+  try {
+    await fastify.listen({ port, host })
+  } catch (error) {
+    if (!fallback || port === 0 || (error as NodeJS.ErrnoException | null)?.code !== 'EADDRINUSE') throw error
+    await fastify.listen({ port: 0, host })
+  }
+  return getBoundPort(fastify.server)
 }

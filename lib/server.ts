@@ -15,7 +15,7 @@ import { registerInjector } from './injector.ts'
 import { BsSockets } from './sockets.ts'
 import { buildSnippet } from './snippet.ts'
 import { BsWatcher } from './watcher.ts'
-import { findFreePort } from './ports.ts'
+import { getBoundPort, listenOnPort } from './ports.ts'
 import { createThrottleServer } from './throttle-server.ts'
 import { getLocalIp } from './ip.ts'
 import { createLogger, logAccessUrls } from './logger.ts'
@@ -115,7 +115,7 @@ async function startServer (
 ): Promise<BsInstance> {
   const opts = parseOptions(rawOpts)
   const logger = opts.logger ?? createLogger(opts.logLevel)
-  const port = await findFreePort(opts.port)
+
   const localIp = getLocalIp()
   const events = new EventEmitter()
   const sessionToken = createSessionToken()
@@ -160,8 +160,13 @@ async function startServer (
   }
 
   const pkg = JSON.parse(readFileSync(resolve(__dirname, '../package.json'), 'utf8')) as { version: string }
-  const snippet = buildSnippet({ port, version: pkg.version, token: sessionToken })
-  registerInjector(fastify, snippet, {
+  let snippet: string | undefined
+  const getSnippet = () => (snippet ??= buildSnippet({
+    port: getBoundPort(fastify.server),
+    version: pkg.version,
+    token: sessionToken,
+  }))
+  registerInjector(fastify, getSnippet, {
     enabled: opts.snippet,
     whitelist: opts.snippetOptions.whitelist,
     blacklist: opts.snippetOptions.blacklist,
@@ -390,7 +395,7 @@ async function startServer (
     })
   }
 
-  await fastify.listen({ port, host: '0.0.0.0' })
+  const port = await listenOnPort(fastify, opts.port, true)
 
   const url = `http://localhost:${port}`
   const socketUrl = appendSessionToken(`ws://localhost:${port}/__bs`, sessionToken)
@@ -405,20 +410,15 @@ async function startServer (
   const throttleServers = new Map<number, ReturnType<typeof createThrottleServer>>()
 
   if (opts.ui !== false) {
-    const uiPort = typeof opts.ui === 'object'
-      ? opts.ui.port
-      : await findFreePort(port + 1)
-    uiUrl = `http://127.0.0.1:${uiPort}`
-    uiExternalUrl = `http://${localIp}:${uiPort}`
-
+    const explicitUiPort = typeof opts.ui === 'object' ? opts.ui.port : undefined
     uiInstance = await createUiServer({
-      uiPort,
+      uiPort: explicitUiPort ?? (port === 65535 ? 0 : port + 1),
+      fallbackPort: explicitUiPort === undefined,
       serverUrl: url,
-      uiUrl,
       localIp,
       mainPort: port,
       mode: serverRoot === null ? 'snippet' : 'server',
-      snippet: serverRoot === null ? snippet : null,
+      snippet: serverRoot === null ? getSnippet() : null,
       serverBaseDirs: serverRoots,
       proxyTarget: null,
       tunnelUrl: null,
@@ -440,6 +440,8 @@ async function startServer (
       handleUiEvent: (event) => pluginManager.handleUiEvent(event),
       sessionToken,
     })
+    uiUrl = uiInstance.uiUrl
+    uiExternalUrl = `http://${localIp}:${uiInstance.uiPort}`
     uiSocketUrl = uiInstance.uiSocketUrl
     startupCleanupTasks.push(() => uiInstance?.exit())
   }
@@ -733,7 +735,7 @@ async function startServer (
   Object.assign(instance, {
     url,
     socketUrl,
-    snippet,
+    snippet: getSnippet(),
     uiUrl: uiInstance?.uiUrl ?? null,
     uiSocketUrl,
     localIp,

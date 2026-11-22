@@ -48,7 +48,7 @@ export function registerInjector<
     Logger,
     TypeProvider
   >,
-  snippet: string,
+  snippet: string | (() => string),
   options: InjectorOptions = {}
 ): void {
   const rule = options.rule ?? defaultRule()
@@ -74,7 +74,7 @@ export function registerInjector<
     const rewritten = applyRewriteRules(html, options.rewriteRules ?? [])
     const injected = rewritten.includes('__bs_script__')
       ? rewritten
-      : applySnippetRule(rewritten, snippet, rule, options.rule === undefined)
+      : applySnippetRule(rewritten, typeof snippet === 'string' ? snippet : snippet(), rule, options.rule === undefined)
 
     // Update content-length to match modified payload
     reply.header('content-length', Buffer.byteLength(injected, 'utf-8'))
