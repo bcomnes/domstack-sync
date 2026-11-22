@@ -13,9 +13,9 @@ export interface SessionDetails {
   kind: SessionKind
   state: SessionState
   cwd: string
-  source?: string
-  destination?: string
-  roots?: string[]
+  source?: string | undefined
+  destination?: string | undefined
+  roots?: string[] | undefined
   port?: number | null
   uiPort?: number | null
 }
@@ -100,9 +100,9 @@ function sessionInfo (record: Record<string, unknown>): SessionInfo | null {
     kind,
     state,
     cwd,
-    ...(absolutePath(source) ? { source } : {}),
-    ...(absolutePath(destination) ? { destination } : {}),
-    ...(Array.isArray(roots) && roots.every(absolutePath) ? { roots: [...roots] } : {}),
+    source: absolutePath(source) ? source : undefined,
+    destination: absolutePath(destination) ? destination : undefined,
+    roots: Array.isArray(roots) && roots.every(absolutePath) ? [...roots] : undefined,
     port,
     uiPort,
     url: port === null ? null : `http://localhost:${port}`,

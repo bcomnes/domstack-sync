@@ -49,6 +49,9 @@ test('registry: ignores malformed and expired records and never returns unlisted
     startedAt: Date.now(),
     expiresAt: Date.now() + 10_000,
     cwd: directory,
+    source: 'relative-source',
+    destination: 42,
+    roots: [directory, 'relative-root'],
     port: 3456,
     url: 'http://localhost:3456/?token=secret',
     secret: 'secret'
@@ -60,7 +63,10 @@ test('registry: ignores malformed and expired records and never returns unlisted
   ])
   const info = await registry.list()
   assert.deepEqual(info.map(entry => entry.id), [id])
-  assert.doesNotMatch(JSON.stringify(info), /secret|token|expiresAt/)
+  assert.equal(info[0]?.source, undefined)
+  assert.equal(info[0]?.destination, undefined)
+  assert.equal(info[0]?.roots, undefined)
+  assert.doesNotMatch(JSON.stringify(info), /secret|token|expiresAt|"(?:source|destination|roots)":/)
   assert.equal(await registry.get('../other'), null)
   assert.equal(await registry.get(expiredId), null)
   // An expired lease on a live PID is hidden, not removed underneath its owner.
