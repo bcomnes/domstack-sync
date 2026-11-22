@@ -1,6 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert'
-import { spawn } from 'node:child_process'
+import { spawn as spawnChild } from 'node:child_process'
+import { once } from 'node:events'
+import { setTimeout as delay } from 'node:timers/promises'
 import { createServer as createHttpServer } from 'node:http'
 import { mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -10,13 +12,22 @@ import { WebSocket } from 'ws'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import type { AddressInfo } from 'node:net'
 import type { Server } from 'node:http'
+import type { SessionInfo } from './session-registry.ts'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 const cliPath = resolve(__dirname, 'cli.ts')
 
-function run (args: string[], cwd = process.cwd()): Promise<{ code: number; stdout: string; stderr: string }> {
+const defaultRegistryDirectory = mkdtempSync(join(tmpdir(), 'dss-cli-registry-'))
+test.after(() => rmSync(defaultRegistryDirectory, { recursive: true, force: true }))
+
+function spawn (file: string, args: string[], options: { cwd: string; stdio: 'pipe'; registryDirectory?: string }) {
+  const { registryDirectory = defaultRegistryDirectory, ...spawnOptions } = options
+  return spawnChild(file, args, { ...spawnOptions, env: { ...process.env, DOMSTACK_SESSION_DIR: registryDirectory } })
+}
+
+function run (args: string[], cwd = process.cwd(), registryDirectory = defaultRegistryDirectory): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [cliPath, ...args], { cwd, stdio: 'pipe' })
+    const child = spawn(process.execPath, [cliPath, ...args], { cwd, stdio: 'pipe', registryDirectory })
     let stdout = ''
     let stderr = ''
     child.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
@@ -75,7 +86,7 @@ function waitForServerUrl (child: ChildProcessWithoutNullStreams): Promise<strin
 
 function closeChild (child: ChildProcessWithoutNullStreams): Promise<void> {
   return new Promise((resolve) => {
-    if (child.exitCode !== null) {
+    if (child.exitCode !== null || child.signalCode !== null) {
       resolve()
       return
     }
@@ -143,6 +154,56 @@ function withTimeout<T> (label: string, promise: Promise<T>, ms = 2500): Promise
     )
   })
 }
+
+test('cli: sessions discovers other processes without loading config and handles stop and crash', { timeout: 15000, skip: process.platform === 'win32' }, async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'dss-discovery-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  const registryDirectory = join(dir, 'registry')
+
+  const reader = mkdtempSync(join(dir, 'reader-'))
+  writeFileSync(join(reader, 'domstack-sync.config.mjs'), 'throw new Error("must not import config")')
+
+  const list = () => run(['sessions', '--json'], reader, registryDirectory)
+  assert.deepEqual(JSON.parse((await list()).stdout), [])
+  const children = Array.from({ length: 2 }, () => {
+    const child = spawn(process.execPath, [cliPath, 'start', '--server', '.', '--port', '0', '--no-ui'], {
+      cwd: dir, stdio: 'pipe', registryDirectory,
+    })
+    const url = waitForServerUrl(child)
+    t.after(() => closeChild(child))
+    return { child, url }
+  })
+  const urls = await Promise.all(children.map(({ url }) => url))
+  let records: SessionInfo[] = []
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const result = await list()
+    assert.equal(result.code, 0, result.stderr)
+    assert.equal(result.stderr, '')
+    records = JSON.parse(result.stdout) as SessionInfo[]
+    if (records.length === 2 && records.every(info => info.state === 'watching')) break
+    await delay(30)
+  }
+  assert.deepEqual(records.map(info => info.url).sort(), urls.sort())
+  const first = records.find(info => info.pid === children[0]?.child.pid)
+  assert.ok(first)
+  const lookup = await run(['sessions', first.id, '--json'], reader, registryDirectory)
+  assert.deepEqual(JSON.parse(lookup.stdout), first)
+  assert.doesNotMatch(lookup.stdout, /token|socketUrl/)
+
+  for (const [i, entry] of children.entries()) {
+    const closed = once(entry.child, 'close')
+    entry.child.kill(i === 0 ? 'SIGTERM' : 'SIGKILL')
+    const [code, signal] = await closed
+    if (i === 0) {
+      assert.equal(code, 0)
+      assert.equal(existsSync(join(registryDirectory, `${first.id}.json`)), false)
+    } else assert.equal(signal, 'SIGKILL')
+  }
+  assert.deepEqual(JSON.parse((await list()).stdout), [])
+  const missing = await run(['sessions', first.id, '--json'], reader, registryDirectory)
+  assert.equal(missing.code, 1)
+  assert.equal(missing.stdout, '')
+})
 
 test('cli: --help exits 0 and prints usage', async () => {
   const { code, stdout } = await run(['--help'])

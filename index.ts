@@ -1,6 +1,16 @@
 export { createServer } from './lib/server.ts'
 export { createLogger, logAccessUrls } from './lib/logger.ts'
 export { parseOptions } from './lib/options.ts'
+export { createSessionRegistry } from './lib/session-registry.ts'
+export type {
+  SessionDetails,
+  SessionInfo,
+  SessionKind,
+  SessionRegistration,
+  SessionRegistry,
+  SessionRegistryOptions,
+  SessionState,
+} from './lib/session-registry.ts'
 export type { BsOptions, BsOptionsInput } from './lib/options.ts'
 export type { AccessUrls, LoggerOptions, LoggerStreams } from './lib/logger.ts'
 export type { BsInstance } from './lib/server.ts'
