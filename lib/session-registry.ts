@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
-import { homedir, tmpdir } from 'node:os'
+import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 
 const sessionIdPattern = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/
@@ -56,7 +56,7 @@ function defaultDirectory (): string {
   const runtimeDir = process.env['XDG_RUNTIME_DIR']
   return runtimeDir && isAbsolute(runtimeDir)
     ? join(runtimeDir, 'domstack-sessions')
-    : join(tmpdir(), `domstack-sessions-${process.getuid?.()}`)
+    : join('/tmp', `domstack-sessions-${process.getuid?.()}`)
 }
 
 function isErrno (error: unknown, code: string): boolean {

@@ -1,7 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -90,6 +91,43 @@ test('registry: refresh extends the lease without changing session identity', { 
     return
   }
   assert.fail('The session lease did not refresh')
+})
+
+test('registry: POSIX fallback is shared across processes with different TMPDIR values', { skip: !process.getuid }, async (t) => {
+  const { directory } = await fixture(t)
+  const writerTmp = join(directory, 'writer')
+  const readerTmp = join(directory, 'reader')
+  await Promise.all([mkdir(writerTmp), mkdir(readerTmp)])
+  const keys = ['TMPDIR', 'DOMSTACK_SESSION_DIR', 'XDG_RUNTIME_DIR']
+  const previous = keys.map(key => process.env[key])
+  const registry = (() => {
+    try {
+      process.env['TMPDIR'] = writerTmp
+      delete process.env['DOMSTACK_SESSION_DIR']
+      delete process.env['XDG_RUNTIME_DIR']
+      return createSessionRegistry()
+    } finally {
+      for (const [index, key] of keys.entries()) {
+        const value = previous[index]
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+    }
+  })()
+  const session = await registry.register({ kind: 'domstack-sync', state: 'watching', cwd: directory })
+  t.after(() => session.dispose())
+  const entry = new URL('../index.ts', import.meta.url)
+  const script = `
+    import { createSessionRegistry } from ${JSON.stringify(entry.href)}
+    const record = await createSessionRegistry().get(process.argv[1])
+    console.log(record?.id ?? '')
+  `
+  const id = execFileSync(process.execPath, ['--input-type=module', '-e', script, session.id], {
+    encoding: 'utf8',
+    timeout: 5000,
+    env: { ...process.env, TMPDIR: readerTmp, DOMSTACK_SESSION_DIR: '', XDG_RUNTIME_DIR: '' },
+  }).trim()
+  assert.equal(id, session.id)
 })
 
 test('registry: missing directories are empty and non-private POSIX directories are rejected', async (t) => {
